@@ -47,10 +47,11 @@ Not measured here: the breaking point above 500 students, sustained load over mi
 | Concurrency and scale | smoke5.py: 3 simultaneous registrations for 1 seat, exactly one wins; load test: 100, 300, 500 students | Concurrent team joins; the same student scanning twice at the same moment under load |
 | Robustness | | Network drops, restarting services mid-session |
 
-## Not yet done
+## Remaining verification and stretch work
 
-- Event certificates, the Problem 2 transcript, budgets, Duty Leave, gallery, WhatsApp.
-- Delivery of notifications and the 7-day, 48-hour and 5-day reminder tasks (scheduled stubs).
+- A single end-to-end run across three clubs (plan through monthly report) is not recorded in this report.
+- Migration 009 additions (club approval, calendar CSV import, activity venues, presenter records, extended event types, campus and top-contributor reports) have not received integration-test coverage yet. This update was checked with Python/JavaScript syntax and whitespace checks only; the existing test results above predate these additions.
+- WhatsApp/Telegram delivery requires provider credentials and is not configured.
 - Sustained-load and breaking-point testing above 500 students; testing on a cloud server.
 - Robustness tests (network drop, service restart during a session).
 - Cost sheet needs the real hosting price (docs/COST.md).
@@ -60,5 +61,5 @@ Not measured here: the breaking point above 500 students, sustained load over mi
 - No rate limiting on the public verify endpoints (only a 5 MB upload cap).
 - CORS is open to all origins (development setting).
 - Files are stored on a local Docker volume, not S3.
-- Reminder tasks and the monthly-report task are scheduled stubs.
+- The existing smoke and load results above do not cover the latest calendar, approval and reporting additions.
 - Non-Latin names in certificates need an extra font package.

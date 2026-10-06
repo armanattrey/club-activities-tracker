@@ -15,12 +15,14 @@ async def request_join(conn, student: dict, club_id: int, mtype: str):
     async with conn.transaction():
         # Lock the club row so concurrent requests/approvals serialize on it.
         club = await conn.fetchrow(
-            "SELECT id, campus_id, capacity FROM clubs WHERE id=$1 FOR UPDATE", club_id
+            "SELECT id, campus_id, capacity, approval_status FROM clubs WHERE id=$1 FOR UPDATE", club_id
         )
         if club is None:
             raise HTTPException(404, "Club not found")
         if club["campus_id"] != student["campus_id"]:
             raise HTTPException(403, "You can only join clubs on your own campus")
+        if club["approval_status"] != "approved":
+            raise HTTPException(404, "Club not found")
 
         approved = await conn.fetchval(
             "SELECT count(*) FROM club_memberships WHERE club_id=$1 AND status='approved'",

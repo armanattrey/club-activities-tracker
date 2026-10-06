@@ -22,7 +22,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 class EventIn(BaseModel):
     name: str = Field(min_length=3, max_length=120)
-    type: Literal["gambade", "hackathon", "cross_road"]
+    type: Literal["gambade", "hackathon", "cross_road", "international_conference", "other"]
     capacity: int = Field(gt=0, le=100000)
     team_size: int | None = Field(default=None, ge=1, le=50)
     starts_at: AwareDatetime | None = None

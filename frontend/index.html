@@ -88,13 +88,13 @@ P.Clubs=async b=>{const cl=await api('GET','/clubs'),quick=JSON.parse(sessionSto
  if(me.role=='student'){const mm=await api('GET','/memberships/me'),j=(c,ty)=>btn(ty,async()=>{await api('POST',`/clubs/${c.id}/join`,{type:ty});toast('Request sent');nav('Clubs')},'s');
   b.append(card(h('h3',{},'Clubs on your campus'),tbl(cl,[['Club','name'],['Seats',c=>`${c.approved_count}/${c.capacity}`],['Join',c=>[j(c,'primary'),j(c,'secondary')]]])),
    card(h('h3',{},'My requests'),tbl(mm,[['Club','club_name'],['Type','type'],['Status',m=>pill(m.status)]])));return}
- b.append(card(h('h3',{},'Create club'),frm([['name','Name'],['?description','Description','area'],['capacity','Capacity','number'],['?advisor_id','Advisor user ID','number'],['?campus_id','Campus ID (super admin only)','number']],'Create',async d=>{await api('POST','/clubs',clean(d));toast('Club created');nav('Clubs')})),
-  card(h('h3',{},'All clubs'),tbl(cl,[['ID','id'],['Club','name'],['Description','description'],['Seats',c=>`${c.approved_count}/${c.capacity}`],['',c=>btn('Edit',async()=>{
+ b.append(card(h('h3',{},'Create club'),frm([['name','Name'],['?description','Description','area'],['capacity','Capacity','number'],['?advisor_id','Advisor user ID','number'],['?meeting_rules','Meeting rules','area'],['?campus_id','Campus ID (super admin only)','number']],'Create',async d=>{const rules=d.meeting_rules?.trim()?{meeting_rules:d.meeting_rules.trim()}:{};delete d.meeting_rules;await api('POST','/clubs',{...clean(d),rules});toast(me.role==='super_admin'?'Club submitted for campus approval':'Club created');nav('Clubs')})),
+  card(h('h3',{},'All clubs'),tbl(cl,[['ID','id'],['Club','name'],['Approval',c=>pill(c.approval_status||'approved')],['Description','description'],['Meeting rules',c=>c.rules?.meeting_rules||'—'],['Seats',c=>`${c.approved_count}/${c.capacity}`],['',c=>[c.approval_status==='pending'&&['campus_admin','super_admin'].includes(me.role)&&btn('Approve',async()=>{await api('POST',`/clubs/${c.id}/decision`,{decision:'approve'});toast('Club approved');nav('Clubs')},'s'),c.approval_status==='pending'&&['campus_admin','super_admin'].includes(me.role)&&btn('Reject',async()=>{const reason=prompt('Reason for rejection?');if(reason===null)return;await api('POST',`/clubs/${c.id}/decision`,{decision:'reject',reason});toast('Club rejected');nav('Clubs')},'d'),btn('Edit',async()=>{
    const description=prompt('Club description',c.description||'');if(description===null)return;
    const capacity=prompt('Capacity',c.capacity);if(capacity===null)return;
    const advisor=prompt('Advisor user ID (leave blank to clear)',c.advisor_id||'');if(advisor===null)return;
    await api('PATCH',`/clubs/${c.id}`,{description,capacity:+capacity,advisor_id:advisor.trim()?+advisor:null});toast('Club updated');nav('Clubs')
-  },'s')]])),
+  },'s')]]])),
   card(h('h3',{},'Add coordinator'),frm([['club_id','Club ID','number'],['user_id','Coordinator user ID','number']],'Add',async d=>{await api('POST',`/clubs/${d.club_id}/coordinators`,{user_id:+d.user_id});toast('Added')})))};
 P.Members=async b=>{const cl=await api('GET','/clubs');if(!cl.length)return b.append(card('No clubs.'));
  const s=picker(cl.map(c=>[c.id,c.name])),box=h('div');
@@ -106,9 +106,11 @@ P.Members=async b=>{const cl=await api('GET','/clubs');if(!cl.length)return b.ap
 const NEXT={approved:'announced',announced:'open',open:'submissions',submissions:'evaluating',evaluating:'closed'};
 P.Days=async b=>{const ds=await api('GET','/club-days'),mgr=!['student','advisor'].includes(me.role),adv=['advisor','campus_admin','super_admin'].includes(me.role),quick=JSON.parse(sessionStorage.getItem('quickItem')||'null');
  if(quick?.type==='day'){const hit=ds.find(x=>x.id===quick.id);if(hit)b.append(card(h('span',{class:'page-eyebrow'},'Quick result'),h('h3',{},hit.title||'Club Day'),h('p',{class:'mut'},`${hit.club_name} · ${hit.day_date} · ${hit.status}`)));sessionStorage.removeItem('quickItem')}
- if(mgr){const cl=await api('GET','/clubs');b.append(card(h('h3',{},'New club day'),frm([['club_id','Club','select',cl.map(c=>[c.id,c.name])],['day_date','Date','date'],['?title','Title'],['?submission_deadline','Submission deadline','datetime-local']],'Create',async d=>{clean(d);if(d.submission_deadline)d.submission_deadline=new Date(d.submission_deadline).toISOString();await api('POST','/club-days',d);toast('Created');nav('Days')})))}
- b.append(card(h('h3',{},'Club days'),tbl(ds,[['#','id'],['Club','club_name'],['Date','day_date'],['Title','title'],['Plan',d=>d.plan_topic?`${d.plan_topic} · ${d.plan_format} · ${d.plan_deliverable}`:(d.plan_body||'')],['Status',d=>pill(d.status)],['Actions',d=>[
-  mgr&&d.status=='planned'&&btn('Submit plan',async()=>{const topic=prompt('Activity topic');if(!topic)return;const format=prompt('Format (presentation, workshop, activity…)');if(!format)return;const deliverable=prompt('Student deliverable');if(!deliverable)return;await api('PUT',`/club-days/${d.id}/plan`,{topic,format,deliverable});toast('Plan sent')},'s'),
+ if(mgr){const cl=await api('GET','/clubs'),approved=cl.filter(c=>!c.approval_status||c.approval_status==='approved');b.append(card(h('h3',{},'New club day'),frm([['club_id','Club','select',approved.map(c=>[c.id,c.name])],['day_date','Date','date'],['?title','Title'],['?submission_deadline','Submission deadline','datetime-local']],'Create',async d=>{clean(d);if(d.submission_deadline)d.submission_deadline=new Date(d.submission_deadline).toISOString();await api('POST','/club-days',d);toast('Created');nav('Days')})),
+  card(h('h3',{},'Import the academic calendar'),h('p',{class:'mut'},'CSV columns: day_date (YYYY-MM-DD), title (optional), submission_deadline (optional ISO date and time with timezone). Add club IDs such as 2,5 to create the same dates for several clubs.'),frm([['club_ids','Club IDs (comma-separated)'],['file','Calendar CSV','file']],'Import calendar',async d=>{const fd=new FormData();fd.append('club_ids',d.club_ids);fd.append('file',d.file);const r=await api('POST','/club-days/import',null,fd);toast(`Imported ${r.created}; skipped ${r.skipped} duplicates`);nav('Days')})))}
+ b.append(card(h('h3',{},'Club days'),tbl(ds,[['#','id'],['Club','club_name'],['Date','day_date'],['Title','title'],['Plan',d=>d.plan_topic?`${d.plan_topic} · ${d.plan_format} · ${d.plan_deliverable}${d.plan_venue?' · '+d.plan_venue:''}`:(d.plan_body||'')],['Status',d=>pill(d.status)],['Actions',d=>[
+  mgr&&d.status=='planned'&&btn('Submit plan',async()=>{const topic=prompt('Activity topic');if(!topic)return;const format=prompt('Format (presentation, workshop, activity…)');if(!format)return;const deliverable=prompt('Student deliverable');if(!deliverable)return;const venue=prompt('Venue (optional)');if(venue===null)return;await api('PUT',`/club-days/${d.id}/plan`,{topic,format,deliverable,venue:venue.trim()||null});toast('Plan sent')},'s'),
+  mgr&&['open','submissions','evaluating','closed'].includes(d.status)&&btn('Mark presenter',async()=>{const student_id=prompt('Student user ID');if(!student_id)return;const title=prompt('Presentation or activity title');if(!title)return;const notes=prompt('Notes (optional)');if(notes===null)return;await api('POST',`/club-days/${d.id}/presenters`,{student_id:+student_id,title,notes:notes||null});toast('Presenter recorded')},'s'),
   adv&&d.status=='planned'&&[btn('Approve plan',async()=>{await api('POST',`/club-days/${d.id}/plan/decision`,{decision:'approve'});nav('Days')}),btn('Reject',async()=>{await api('POST',`/club-days/${d.id}/plan/decision`,{decision:'reject',reason:prompt('Reason?')||null});nav('Days')},'d')],
   mgr&&NEXT[d.status]&&btn('→ '+NEXT[d.status],async()=>{await api('POST',`/club-days/${d.id}/transition`,{target:NEXT[d.status]});nav('Days')},'s')]]])))};
 
@@ -204,7 +206,7 @@ P.Events=async b=>{
   if(stu&&e.my_registered)box.push(frm([['file','Choose a photo','file'],['consent_to_publish','I consent to sharing this photo in the event gallery','checkbox']],'Share a photo',async d=>{const fd=new FormData();fd.append('file',d.file);fd.append('consent_to_publish',String(d.consent_to_publish==='on'));const r=await api('POST',`/events/${id}/media`,null,fd);toast('Photo sent for review');show(id)},0));
   det.replaceChildren(card(...box));
  }
- if(adm){const fields=[['name','Event name'],['type','Type','select',[['gambade','Gambade'],['hackathon','Hackathon'],['cross_road','Cross Road']]],['capacity','Capacity','number'],['?team_size','Team size','number'],['?starts_at','Starts at','datetime-local'],['?is_inter_college','Inter-campus event (approval required)','checkbox']];if(me.role==='super_admin')fields.push(['?campus_id','Campus ID']);
+ if(adm){const fields=[['name','Event name'],['type','Type','select',[['gambade','Gambade'],['hackathon','Hackathon'],['cross_road','Cross Road'],['international_conference','International Conference'],['other','Other']]],['capacity','Capacity','number'],['?team_size','Team size','number'],['?starts_at','Starts at','datetime-local'],['?is_inter_college','Inter-campus event (approval required)','checkbox']];if(me.role==='super_admin')fields.push(['?campus_id','Campus ID']);
   b.append(card(h('div',{class:'card-heading'},h('div',{},h('span',{class:'page-eyebrow'},'Host an experience'),h('h3',{},'Create event')),h('span',{class:'soft-icon'},'✦')),frm(fields,'Create event',async d=>{clean(d);d.is_inter_college=d.is_inter_college==='on';if(d.starts_at)d.starts_at=new Date(d.starts_at).toISOString();await api('POST','/events',d);toast('Event created');nav('Events')})))}
  const eventRows=ev.map(x=>({...x,approval:x.is_inter_college?(x.approved_at?pill('Approved'):pill('Needs approval')):pill('Campus')}));
  b.append(card(h('div',{class:'card-heading'},h('div',{},h('span',{class:'page-eyebrow'},`${ev.length} on the calendar`),h('h3',{},'Events')),h('span',{class:'soft-icon'},'↗')),tbl(eventRows,[['Event','name'],['Type',e=>e.type.replaceAll('_',' ')],['Seats',e=>`${e.registered}/${e.capacity}`],['Starts',e=>e.starts_at?new Date(e.starts_at).toLocaleString():'To be announced'],['Access','approval'],['',e=>[btn('Explore',()=>go(()=>show(e.id)),'s'),stu&&e.my_registered&&pill('Registered')]]])),det);
@@ -248,9 +250,11 @@ P.Dashboard=async b=>{
   cl=card(h('h3',{},'Clubs'),btn('Download CSV',()=>dl('/dashboards/export/clubs','clubs.csv'),'s')),
   ia=card(h('h3',{},'Inactive clubs (no approved club day in the last N weeks)')),
   zp=card(h('h3',{},'Zero-participation students (no attendance, submissions or event registrations)')),
+  tc=card(h('h3',{},'Top contributors'),btn('Download CSV',()=>dl('/dashboards/export/top-contributors','top-contributors.csv'),'s')),
+  cp=card(h('h3',{},'Participation by campus')),
   mo=card(h('h3',{},'Monthly report')),
   st=card(h('h3',{},'Students (first 100)'),btn('Download CSV',()=>dl('/dashboards/export/students','students.csv'),'s'));
- b.append(sum,cl,ia,zp,mo,st);
+ b.append(sum,cl,ia,zp,tc,cp,mo,st);
  const nice=k=>k.replace(/_/g,' '),cols=r=>Object.keys(r[0]||{}).map(k=>[nice(k),k]),
   flat=o=>Object.entries(o).map(([k,v])=>({k:nice(k),v:v&&typeof v=='object'?JSON.stringify(v):v}));
  await go(async()=>{
@@ -261,9 +265,12 @@ P.Dashboard=async b=>{
   ia.append('Weeks: ',wk,btn('Refresh',li,'s'),ib);await li();
   const z=await api('GET','/dashboards/zero-participation');
   zp.append(h('p',{class:'mut'},z.length+' student(s)'),tbl(z,[['Student',x=>`${x.name} (${x.student_code})`],['User ID','student_id']]));
+  const top=await api('GET','/dashboards/top-contributors?limit=10');
+  tc.append(tbl(top,[['Student',x=>`${x.name} (${x.student_code})`],['Verified activities','verified_activity_count'],['Attendance','attendance_records'],['Submissions','submissions'],['Events','event_registrations'],['Certificates','certificates']]));
+  cp.append(tbl(await api('GET','/dashboards/campuses'),[['Campus','campus_name'],['Clubs','clubs'],['Members','members'],['Club Days','club_days'],['Check-ins','attendance_records'],['Submissions','submissions'],['Average score','average_score']]));
   const mi=h('input',{type:'text',value:new Date().toISOString().slice(0,7),placeholder:'YYYY-MM',style:'width:110px'}),mb=h('div'),
    lm=async()=>{const r=await api('GET','/dashboards/monthly-report?month='+encodeURIComponent(mi.value));
-    mb.replaceChildren(h('p',{},r.reconciled?'Totals reconcile with the raw tables.':'MISMATCH: '+JSON.stringify(r.mismatches)),tbl(r.clubs,cols(r.clubs)),h('p',{},h('b',{},'Totals: '),JSON.stringify(r.totals)))};
+    mb.replaceChildren(h('p',{},r.reconciled?'Totals reconcile with the raw tables.':'MISMATCH: '+JSON.stringify(r.mismatches)),tbl(r.clubs,cols(r.clubs)),h('h4',{},'Campus highlights'),tbl(r.highlights||[],cols(r.highlights||[])),h('p',{},h('b',{},'Totals: '),JSON.stringify(r.totals)))};
   mo.append('Month: ',mi,btn('Show',lm,'s'),btn('Download CSV',()=>dl('/dashboards/export/monthly-report?month='+encodeURIComponent(mi.value),'report-'+mi.value+'.csv'),'s'),mb);await lm();
   const s1=await api('GET','/dashboards/students?limit=100');st.append(tbl(s1,cols(s1)));
  })};
@@ -278,8 +285,13 @@ P.Notifications=async b=>{
     if(p.club_name)parts.push(p.club_name);
     if(p.title)parts.push(p.title);
     if(p.day_date)parts.push(p.day_date);
+    if(p.topic)parts.push('Topic: '+p.topic);
+    if(p.format)parts.push('Format: '+p.format);
+    if(p.deliverable)parts.push('Deliverable: '+p.deliverable);
+    if(p.venue)parts.push('Venue: '+p.venue);
     if(p.deadline)parts.push('Due '+new Date(p.deadline).toLocaleString());
-    if(p.month)parts.push(`${p.month}: ${p.club_days||0} Club Days, ${p.attendance_records||0} check-ins, ${p.submissions||0} submissions`);
+    if(p.month)parts.push(`${p.month}: ${p.club_days||0} Club Days, ${p.attendance_records||0} check-ins, ${p.submissions||0} submissions, ${p.attendance_percentage||0}% attendance, ${p.average_score||0} average score`);
+    if(p.highlights?.length)parts.push('Highlights: '+p.highlights.map(x=>`${x.club_name}: ${x.highlight}`).join('; '));
     return parts.join(' — ')
    }],['Received',n=>new Date(n.send_at).toLocaleString()],['Status',n=>n.read_at?'Read':'Unread'],['',n=>!n.read_at&&btn('Mark read',async()=>{await api('POST',`/notifications/${n.id}/read`,{});refresh()},'s')]]));
   updateBadge();

@@ -116,9 +116,34 @@ async def _monthly(conn, user: dict, month: str) -> dict:
                  JOIN checkin_sessions s ON s.id = a.session_id
                  JOIN club_days d ON d.id = s.club_day_id
                  WHERE d.club_id = c.id AND {in_month}) AS unique_attendees,
+              (SELECT count(DISTINCT (d.id, a.student_id)) FROM attendance a
+                 JOIN checkin_sessions s ON s.id = a.session_id
+                 JOIN club_days d ON d.id = s.club_day_id
+                 WHERE d.club_id=c.id AND {in_month}) AS attendance_participants,
+              (SELECT count(*) FROM club_memberships m
+                 WHERE m.club_id=c.id AND m.status='approved') AS members,
+              (SELECT round(100.0 * count(DISTINCT (d.id, a.student_id)) FILTER (WHERE a.student_id IS NOT NULL) / NULLIF(
+                       count(DISTINCT d.id) * (SELECT count(*) FROM club_memberships m
+                         WHERE m.club_id=c.id AND m.status='approved'), 0), 2)
+                 FROM club_days d
+                 LEFT JOIN checkin_sessions s ON s.club_day_id=d.id
+                 LEFT JOIN attendance a ON a.session_id=s.id
+                 WHERE d.club_id=c.id AND {in_month}) AS attendance_percentage,
               (SELECT count(*) FROM submissions sb
                  JOIN club_days d ON d.id = sb.club_day_id
                  WHERE d.club_id = c.id AND {in_month}) AS submissions,
+              (SELECT round(avg((SELECT sum(x.value::numeric) FROM jsonb_each_text(e.scores) AS x)), 2)
+                 FROM evaluations e JOIN submissions sb ON sb.id=e.submission_id
+                 JOIN club_days d ON d.id=sb.club_day_id
+                 WHERE d.club_id=c.id AND {in_month}) AS average_score,
+              (SELECT COALESCE(d.title, p.topic, 'Club Day')
+                 FROM club_days d LEFT JOIN activity_plans p ON p.club_day_id=d.id
+                 LEFT JOIN submissions sb ON sb.club_day_id=d.id
+                 LEFT JOIN evaluations e ON e.submission_id=sb.id
+                 WHERE d.club_id=c.id AND {in_month}
+                 GROUP BY d.id, d.title, p.topic
+                 ORDER BY avg((SELECT sum(x.value::numeric) FROM jsonb_each_text(e.scores) AS x)) DESC NULLS LAST,
+                          count(DISTINCT sb.id) DESC, d.day_date DESC LIMIT 1) AS highlight,
               (SELECT count(*) FROM certificates ce
                  JOIN club_days d ON d.id = ce.ref_id
                  WHERE ce.ref_type = 'club_day' AND ce.revoked_at IS NULL
@@ -141,6 +166,10 @@ async def _monthly(conn, user: dict, month: str) -> dict:
                  JOIN club_days d ON d.id = s.club_day_id
                  JOIN clubs c ON c.id = d.club_id
                  WHERE {frag} AND {in_month}) AS unique_attendees_overall,
+              (SELECT round(avg((SELECT sum(x.value::numeric) FROM jsonb_each_text(e.scores) AS x)), 2)
+                 FROM evaluations e JOIN submissions sb ON sb.id=e.submission_id
+                 JOIN club_days d ON d.id=sb.club_day_id JOIN clubs c ON c.id=d.club_id
+                 WHERE {frag} AND {in_month}) AS average_score,
               (SELECT count(*) FROM submissions sb
                  JOIN club_days d ON d.id = sb.club_day_id
                  JOIN clubs c ON c.id = d.club_id
@@ -161,9 +190,19 @@ async def _monthly(conn, user: dict, month: str) -> dict:
             mismatches.append({"metric": k, "sum_of_clubs": total, "raw_total": raw[k]})
     totals = {k: raw[k] for k in keys}
     totals["unique_attendees_overall"] = raw["unique_attendees_overall"]
+    totals["average_score"] = raw["average_score"]
+    eligible = sum(r["members"] * r["club_days"] for r in per_club)
+    totals["attendance_percentage"] = round(
+        100 * sum(r["attendance_participants"] for r in per_club) / eligible, 2
+    ) if eligible else 0
     return {
         "month": month,
         "clubs": [dict(r) for r in per_club],
+        "highlights": sorted([
+            {"club_id": r["club_id"], "club_name": r["club_name"], "highlight": r["highlight"],
+             "average_score": r["average_score"], "submissions": r["submissions"]}
+            for r in per_club if r["highlight"]
+        ], key=lambda r: (r["average_score"] is None, -(r["average_score"] or 0), -r["submissions"]))[:5],
         "totals": totals,
         "reconciled": not mismatches,
         "mismatches": mismatches,
@@ -228,6 +267,27 @@ async def clubs(user: dict = Depends(require_role(*STAFF)), conn=Depends(get_con
     return await _club_rows(conn, user)
 
 
+@router.get("/campuses")
+async def campuses(user: dict = Depends(require_role(*STAFF)), conn=Depends(get_conn)):
+    """Campus rollups constrained to the caller's club visibility."""
+    frag, val = club_scope(user)
+    rows = await conn.fetch(
+        f"""SELECT cp.id AS campus_id, cp.name AS campus_name,
+                   count(DISTINCT c.id) AS clubs,
+                   COALESCE(sum(v.members),0) AS members,
+                   COALESCE(sum(v.club_days),0) AS club_days,
+                   COALESCE(sum(v.attendance_records),0) AS attendance_records,
+                   COALESCE(sum(v.submissions),0) AS submissions,
+                   round(avg(v.avg_score),2) AS average_score
+            FROM campus cp JOIN clubs c ON c.campus_id=cp.id
+            JOIN v_club_stats v ON v.club_id=c.id
+            WHERE {frag}
+            GROUP BY cp.id, cp.name ORDER BY cp.name""",
+        val,
+    )
+    return [dict(r) for r in rows]
+
+
 @router.get("/inactive-clubs")
 async def inactive_clubs(
     weeks: int = Query(4, ge=1, le=104),
@@ -271,6 +331,26 @@ async def students(
     return await _student_rows(conn, user, limit=limit, offset=offset)
 
 
+@router.get("/top-contributors")
+async def top_contributors(
+    limit: int = Query(10, ge=1, le=100),
+    user: dict = Depends(require_role(*STAFF)),
+    conn=Depends(get_conn),
+):
+    """Rank scoped students by recorded contributions across the platform."""
+    frag, val = student_scope(user)
+    rows = await conn.fetch(
+        f"""SELECT v.student_id, v.name, v.student_code, v.attendance_records,
+                   v.submissions, v.event_registrations, v.certificates,
+                   (v.attendance_records + v.submissions + v.event_registrations + v.certificates)
+                     AS verified_activity_count
+            FROM v_student_stats v WHERE {frag}
+            ORDER BY verified_activity_count DESC, v.name, v.student_id LIMIT $2""",
+        val, limit,
+    )
+    return [dict(r) for r in rows]
+
+
 @router.get("/monthly-report")
 async def monthly_report(
     month: str = Query(..., pattern=MONTH_RE),
@@ -291,6 +371,17 @@ async def export(
         rows = await _club_rows(conn, user)
     elif kind == "students":
         rows = await _student_rows(conn, user, limit=MAX_EXPORT, offset=0)
+    elif kind == "top-contributors":
+        frag, val = student_scope(user)
+        rows = [dict(r) for r in await conn.fetch(
+            f"""SELECT v.student_id, v.name, v.student_code, v.attendance_records,
+                       v.submissions, v.event_registrations, v.certificates,
+                       (v.attendance_records + v.submissions + v.event_registrations + v.certificates)
+                         AS verified_activity_count
+                FROM v_student_stats v WHERE {frag}
+                ORDER BY verified_activity_count DESC, v.name, v.student_id LIMIT $2""",
+            val, MAX_EXPORT,
+        )]
     elif kind == "monthly-report":
         if not month:
             raise HTTPException(422, "month is required (YYYY-MM)")

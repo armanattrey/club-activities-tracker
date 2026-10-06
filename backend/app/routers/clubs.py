@@ -1,7 +1,9 @@
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from typing import Literal
 
+from app.core import audit
 from app.core.permissions import ADMIN_ROLES, assert_club_access, current_user, require_role
 from app.db import get_conn
 
@@ -29,6 +31,11 @@ class CoordinatorIn(BaseModel):
     user_id: int
 
 
+class ClubDecisionIn(BaseModel):
+    decision: Literal["approve", "reject"]
+    reason: str | None = Field(default=None, max_length=500)
+
+
 @router.post("", status_code=201)
 async def create_club(
     body: ClubIn,
@@ -45,11 +52,15 @@ async def create_club(
     if body.advisor_id is not None:
         await _validate_advisor(conn, body.advisor_id, campus_id)
     try:
+        approval_status = "pending" if user["role"] == "super_admin" else "approved"
         row = await conn.fetchrow(
-            """INSERT INTO clubs (campus_id, name, description, capacity, advisor_id, rules)
-               VALUES ($1,$2,$3,$4,$5,$6) RETURNING *""",
+            """INSERT INTO clubs (campus_id, name, description, capacity, advisor_id, rules,
+                                  approval_status, approved_by, approved_at, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,
+                       CASE WHEN $7='approved' THEN $8 ELSE NULL END,
+                       CASE WHEN $7='approved' THEN now() ELSE NULL END,$8) RETURNING *""",
             campus_id, body.name.strip(), body.description.strip(), body.capacity,
-            body.advisor_id, body.rules,
+            body.advisor_id, body.rules, approval_status, user["id"],
         )
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, "A club with this name already exists on that campus")
@@ -76,7 +87,9 @@ async def list_clubs(user: dict = Depends(current_user), conn=Depends(get_conn))
     role = user["role"]
     if role == "super_admin":
         rows = await conn.fetch(base + " ORDER BY c.id")
-    elif role in ("student", "campus_admin"):
+    elif role == "student":
+        rows = await conn.fetch(base + " WHERE c.campus_id=$1 AND c.approval_status='approved' ORDER BY c.id", user["campus_id"])
+    elif role == "campus_admin":
         rows = await conn.fetch(base + " WHERE c.campus_id=$1 ORDER BY c.id", user["campus_id"])
     elif role == "coordinator":
         rows = await conn.fetch(
@@ -95,7 +108,27 @@ async def get_club(club_id: int, user: dict = Depends(current_user), conn=Depend
         raise HTTPException(404, "Club not found")
     if user["role"] != "super_admin" and club["campus_id"] != user["campus_id"]:
         raise HTTPException(403, "Different campus")
+    if user["role"] == "student" and club["approval_status"] != "approved":
+        raise HTTPException(404, "Club not found")
     return dict(club)
+
+
+@router.post("/{club_id}/decision")
+async def decide_club(club_id: int, body: ClubDecisionIn,
+                      user: dict = Depends(require_role(*ADMIN_ROLES)), conn=Depends(get_conn)):
+    async with conn.transaction():
+        club = await conn.fetchrow("SELECT * FROM clubs WHERE id=$1 FOR UPDATE", club_id)
+        if club is None or (user["role"] != "super_admin" and club["campus_id"] != user["campus_id"]):
+            raise HTTPException(404, "Club not found")
+        if club["approval_status"] != "pending":
+            raise HTTPException(409, "Club is not awaiting approval")
+        status = "approved" if body.decision == "approve" else "rejected"
+        row = await conn.fetchrow("""UPDATE clubs SET approval_status=$2, approved_by=$3,
+          approved_at=now() WHERE id=$1 RETURNING *""", club_id, status, user["id"])
+        await audit.log(conn, actor_id=user["id"], action=f"club.{body.decision}", entity="clubs",
+          entity_id=club_id, before={"approval_status": "pending"},
+          after={"approval_status": status}, reason=body.reason)
+    return dict(row)
 
 
 @router.patch("/{club_id}")

@@ -5,6 +5,7 @@ Scheduled reminders are written to the in-app notification inbox. The unique
 dedupe key makes each reminder idempotent across repeated beat runs.
 """
 import asyncio
+import json
 import logging
 import os
 
@@ -18,6 +19,8 @@ log = logging.getLogger(__name__)
 async def _with_conn(fn):
     conn = await asyncpg.connect(os.environ["DATABASE_URL"])
     try:
+        await conn.set_type_codec("json", schema="pg_catalog", encoder=json.dumps, decoder=json.loads)
+        await conn.set_type_codec("jsonb", schema="pg_catalog", encoder=json.dumps, decoder=json.loads)
         return await fn(conn)
     finally:
         await conn.close()
@@ -38,7 +41,13 @@ async def _announce(conn) -> int:
                    SELECT student_id, 'club_day.announced',
                           jsonb_build_object('club_day_id', $1::bigint,
                                              'club_name', (SELECT name FROM clubs WHERE id=$2),
-                                             'day_date', (SELECT day_date FROM club_days WHERE id=$1)),
+                                             'day_date', (SELECT day_date FROM club_days WHERE id=$1),
+                                             'title', (SELECT title FROM club_days WHERE id=$1),
+                                             'deadline', (SELECT submission_deadline FROM club_days WHERE id=$1),
+                                             'topic', (SELECT topic FROM activity_plans WHERE club_day_id=$1),
+                                             'format', (SELECT format FROM activity_plans WHERE club_day_id=$1),
+                                             'deliverable', (SELECT deliverable FROM activity_plans WHERE club_day_id=$1),
+                                             'venue', (SELECT venue FROM activity_plans WHERE club_day_id=$1)),
                           'club_day.announced:' || $1::text || ':' || student_id::text
                    FROM club_memberships
                    WHERE club_id = $2 AND status = 'approved'""",
@@ -112,11 +121,14 @@ async def _remind_48h(conn) -> int:
                SELECT m.student_id, 'club_day.upcoming',
                       jsonb_build_object('club_day_id', d.id, 'club_id', c.id,
                                          'club_name', c.name, 'day_date', d.day_date,
-                                         'title', d.title),
+                                         'title', d.title, 'deadline', d.submission_deadline,
+                                         'topic', p.topic, 'format', p.format,
+                                         'deliverable', p.deliverable, 'venue', p.venue),
                       'club_day.upcoming:' || d.id::text || ':' || m.student_id::text
                FROM club_days d
                JOIN clubs c ON c.id=d.club_id
                JOIN club_memberships m ON m.club_id=c.id AND m.status='approved'
+               LEFT JOIN activity_plans p ON p.club_day_id=d.id
                WHERE d.status IN ('announced','approved')
                  AND d.day_date=(now() AT TIME ZONE 'Asia/Kolkata')::date + 2
                ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
@@ -176,20 +188,41 @@ async def _monthly_report(conn) -> int:
             return 0
         month = period_end.strftime("%Y-%m")
         rows = await conn.fetch(
-            """SELECT u.id AS user_id, u.campus_id,
-                      count(DISTINCT c.id) FILTER (WHERE d.id IS NOT NULL) AS clubs,
-                      count(DISTINCT d.id) AS club_days,
-                      count(DISTINCT a.id) AS attendance_records,
-                      count(DISTINCT s.id) AS submissions
-               FROM users u
-               JOIN clubs c ON c.campus_id=u.campus_id
-               LEFT JOIN club_days d ON d.club_id=c.id AND d.status <> 'planned'
-                 AND d.day_date >= $1::date AND d.day_date < $2::date
-               LEFT JOIN checkin_sessions cs ON cs.club_day_id=d.id
-               LEFT JOIN attendance a ON a.session_id=cs.id
-               LEFT JOIN submissions s ON s.club_day_id=d.id
-               WHERE u.role='campus_admin'
-               GROUP BY u.id, u.campus_id""",
+            """WITH campus_days AS (
+                 SELECT c.campus_id, c.id AS club_id, c.name AS club_name, d.id AS day_id,
+                        COALESCE(d.title, p.topic, 'Club Day') AS highlight,
+                        (SELECT count(*) FROM checkin_sessions cs JOIN attendance a ON a.session_id=cs.id
+                         WHERE cs.club_day_id=d.id) AS attendance_records,
+                        (SELECT count(DISTINCT a.student_id) FROM checkin_sessions cs JOIN attendance a ON a.session_id=cs.id
+                         WHERE cs.club_day_id=d.id) AS unique_attendees,
+                        (SELECT count(*) FROM submissions s WHERE s.club_day_id=d.id) AS submissions,
+                        (SELECT count(*) FROM club_memberships m WHERE m.club_id=c.id AND m.status='approved') AS members,
+                        (SELECT round(avg((SELECT sum(x.value::numeric) FROM jsonb_each_text(e.scores) AS x)), 2)
+                         FROM submissions sb JOIN evaluations e ON e.submission_id=sb.id
+                         WHERE sb.club_day_id=d.id) AS average_score
+                 FROM club_days d JOIN clubs c ON c.id=d.club_id
+                 LEFT JOIN activity_plans p ON p.club_day_id=d.id
+                 WHERE d.status <> 'planned' AND d.day_date >= $1::date AND d.day_date < $2::date
+               ), summaries AS (
+                 SELECT campus_id, count(DISTINCT club_id) AS clubs, count(*) AS club_days,
+                        sum(attendance_records) AS attendance_records, sum(submissions) AS submissions,
+                        sum(unique_attendees) AS unique_attendees, sum(members) AS possible_attendance,
+                        round(avg(average_score), 2) AS average_score
+                 FROM campus_days GROUP BY campus_id
+               )
+               SELECT u.id AS user_id, u.campus_id,
+                      COALESCE(s.clubs,0) AS clubs, COALESCE(s.club_days,0) AS club_days,
+                      COALESCE(s.attendance_records,0) AS attendance_records,
+                      COALESCE(s.submissions,0) AS submissions,
+                      COALESCE(s.average_score,0)::float8 AS average_score,
+                      COALESCE(round(100.0*s.unique_attendees/NULLIF(s.possible_attendance,0),2),0)::float8 AS attendance_percentage,
+                      COALESCE((SELECT jsonb_agg(to_jsonb(h)) FROM (
+                        SELECT club_name, highlight, average_score, submissions FROM campus_days d
+                        WHERE d.campus_id=u.campus_id
+                        ORDER BY average_score DESC NULLS LAST, submissions DESC, club_name LIMIT 5
+                      ) h), '[]'::jsonb) AS highlights
+               FROM users u LEFT JOIN summaries s ON s.campus_id=u.campus_id
+               WHERE u.role='campus_admin'""",
             period_end, tomorrow,
         )
         made = 0
@@ -207,6 +240,9 @@ async def _monthly_report(conn) -> int:
                     "club_days": row["club_days"],
                     "attendance_records": row["attendance_records"],
                     "submissions": row["submissions"],
+                    "attendance_percentage": row["attendance_percentage"],
+                    "average_score": row["average_score"],
+                    "highlights": row["highlights"],
                 },
                 row["campus_id"], month,
             )
