@@ -1,0 +1,37 @@
+PASS  no certificate without attendance (403)
+PASS  setup: s001 checks in
+PASS  student who did not attend cannot claim (403)
+PASS  s001 claims a participation certificate (201)
+PASS  claiming twice returns the same certificate (200, already_issued)
+PASS  worker generated the PDF (status ready)
+PASS  student downloads own PDF (real PDF, not empty)
+PASS  another student cannot download it (404)
+PASS  coordinator downloads the same bytes
+PASS  download needs login (401)
+PASS  public verify says VALID without logging in
+PASS  verify shows the right club and a student name
+PASS  verify does not expose student code or email
+PASS  QR landing page is an HTML page (200)
+PASS  unknown certificate id -> 404
+PASS  malformed id -> 404
+PASS  the original PDF matches
+PASS  a PDF with one extra byte does NOT match
+PASS  editing the DB row is detected (TAMPERED_RECORD, no details shown)
+PASS  restoring the row makes it VALID again
+PASS  student cannot bulk-issue (403)
+PASS  coordinator bulk-issue: nothing new, attendee already has one
+PASS  student cannot issue achievement (403)
+PASS  coordinator cannot issue achievement (403)
+PASS  achievement for a non-member is refused (422)
+PASS  advisor issues an achievement certificate (201)
+PASS  issuing the same achievement twice is blocked (409)
+PASS  achievement PDF is generated
+PASS  verify shows the achievement text
+PASS  coordinator lists both certificates for the club day
+PASS  coordinator cannot revoke (403)
+PASS  revoke needs a real reason (422)
+PASS  advisor revokes the certificate (200)
+PASS  verify now says REVOKED
+PASS  revoking twice is blocked (409)
+
+35/35 checks passed

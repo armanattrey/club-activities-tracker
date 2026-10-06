@@ -1,0 +1,20 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /loadtest/checkin.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 500 max VUs, 3m30s max duration (incl. graceful stop):
+              * burst: 1 iterations for each of 500 VUs (maxDuration: 3m0s, gracefulStop: 30s)
+
+students=500 created=500 dup=0 errors=0 p95=100.1ms
+RESULT_JSON:{"level":500,"requests":500,"created_201":500,"already_409":0,"other_errors":0,"avg_ms":57.4,"med_ms":51.6,"p90_ms":94.3,"p95_ms":100.1,"p99_ms":106.3,"max_ms":110.6,"burst_seconds":0.1}
+
+running (0m00.1s), 000/500 VUs, 500 complete and 0 interrupted iterations
+burst ✓ [ 100% ] 500 VUs  0m00.1s/3m0s  500/500 iters, 1 per VU

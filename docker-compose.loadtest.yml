@@ -1,0 +1,5 @@
+# Load-test override: several API workers, no auto-reload.
+# Used by loadtest/run.sh
+services:
+  api:
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4

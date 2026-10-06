@@ -1,0 +1,31 @@
+PASS  rubric lists 3 criteria
+PASS  student uploads a PDF (201, not late)
+PASS  response does not leak the storage key
+PASS  file whose content doesn't match its extension is rejected (422)
+PASS  disallowed extension is rejected (422)
+PASS  empty file is rejected (422)
+PASS  PDF sent as a 'photo' is rejected (422)
+PASS  student uploads a photo (201)
+PASS  student submits a link (201)
+PASS  non-http link is rejected (422)
+PASS  upload after the deadline is accepted but flagged late
+PASS  non-member cannot submit (404)
+PASS  coordinator downloads the file, bytes identical
+PASS  student downloads their own file
+PASS  another student cannot download it (404)
+PASS  student cannot score (403)
+PASS  scoring while day is 'open' is refused (409)
+PASS  club day moves to 'submissions'
+PASS  missing a criterion is rejected (422)
+PASS  score out of range is rejected (422)
+PASS  coordinator scores the submission (total 12/15)
+PASS  re-scoring updates the score (total 14/15)
+PASS  student cannot see scores before the day is closed
+PASS  coordinator sees scores and all submissions
+PASS  club day moves to 'evaluating'
+PASS  uploads are refused once evaluating (409)
+PASS  club day moves to 'closed'
+PASS  student now sees their score (14/15)
+PASS  scoring is frozen after close (409)
+
+29/29 checks passed

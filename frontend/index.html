@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Club Activities Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{--bg:#f6f7fb;--c:#fff;--t:#1f2937;--m:#6b7280;--p:#2543c4;--b:#e5e7eb;--ok:#166534;--bad:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--c:#181b22;--t:#e5e7eb;--m:#9ca3af;--p:#6d8cff;--b:#2a2f3a;--ok:#15803d;--bad:#dc2626}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:var(--c);border-bottom:1px solid var(--b);flex-wrap:wrap;gap:.5rem}
+nav{display:flex;gap:.3rem;padding:.6rem 1rem;overflow-x:auto}
+nav button{background:none;color:var(--t);border:1px solid var(--b)}nav button.on{background:var(--p);color:#fff;border-color:var(--p)}
+main{max-width:980px;margin:0 auto;padding:1rem}
+.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:1rem;margin-bottom:1rem;overflow-x:auto}
+button{background:var(--p);color:#fff;border:0;border-radius:8px;padding:.45rem .8rem;cursor:pointer;font:inherit;margin:2px}
+button.s{background:none;color:var(--p);border:1px solid var(--p)}button.d{background:var(--bad)}
+input,select,textarea{font:inherit;padding:.45rem;border:1px solid var(--b);border-radius:8px;background:var(--bg);color:var(--t);width:100%}
+label{display:block;font-size:.85rem;color:var(--m);margin:.5rem 0}form{max-width:420px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.4rem .5rem;border-bottom:1px solid var(--b);vertical-align:top}
+th{color:var(--m);font-weight:600;font-size:.8rem}td form{min-width:200px}
+.pill{padding:2px 8px;border-radius:99px;background:var(--b);font-size:.8rem}.mut{color:var(--m)}
+.big{font:700 1.6rem ui-monospace,monospace;letter-spacing:2px;margin:.5rem 0;word-break:break-all}
+.qr{padding:12px;background:#fff;display:inline-block;border-radius:8px}h3{margin:.2rem 0 .6rem}
+.toast{position:fixed;bottom:1rem;right:1rem;background:var(--ok);color:#fff;padding:.7rem 1rem;border-radius:10px;max-width:80vw;z-index:9}.toast.bad{background:var(--bad)}
+</style></head><body><div id="app"></div><script>
+const g=k=>localStorage.getItem(k),API=()=>g('api')||'http://localhost:8000';
+let tok=sessionStorage.getItem('t'),me=JSON.parse(sessionStorage.getItem('me')||'null'),iv;
+const h=(t,a={},...c)=>{const e=document.createElement(t);for(const k in a)k.startsWith('on')?e[k]=a[k]:e.setAttribute(k,a[k]);c.flat(9).forEach(x=>e.append(x&&x.nodeType?x:document.createTextNode(x==null||x===false?'':x)));return e};
+const toast=(m,bad)=>{const t=h('div',{class:'toast'+(bad?' bad':'')},m);document.body.append(t);setTimeout(()=>t.remove(),3600)};
+const go=async f=>{try{return await f()}catch(e){toast(e.message,1)}};
+async function api(m,p,b,fd){const o={method:m,headers:{}};if(tok)o.headers.Authorization='Bearer '+tok;
+ if(fd)o.body=fd;else if(b){o.headers['Content-Type']='application/json';o.body=JSON.stringify(b)}
+ const r=await fetch(API()+p,o).catch(()=>{throw new Error('Cannot reach the API at '+API())});
+ if(r.status==401&&tok){out();throw new Error('Session expired')}
+ if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(typeof d.detail=='string'?d.detail:Array.isArray(d.detail)?d.detail.map(x=>x.msg).join('; '):'Error '+r.status)}
+ return(r.headers.get('content-type')||'').includes('json')?r.json():r}
+const pill=s=>h('span',{class:'pill'},s),card=(...c)=>h('div',{class:'card'},...c);
+const btn=(t,f,c='')=>h('button',{class:c,onclick:()=>go(f)},t);
+const tbl=(r,cols)=>r.length?h('table',{},h('tr',{},cols.map(c=>h('th',{},c[0]))),r.map(x=>h('tr',{},cols.map(c=>h('td',{},typeof c[1]=='function'?c[1](x):x[c[1]]))))):h('p',{class:'mut'},'Nothing here yet.');
+// fields: [name,label,type,options]; a name starting with ? is optional
+const frm=(fs,lab,fn,reset=1)=>{const f=h('form',{onsubmit:ev=>{ev.preventDefault();go(async()=>{await fn(Object.fromEntries(new FormData(f)));reset&&f.reset()})}},
+ fs.map(([n,l,t,o])=>{const opt=n[0]=='?',nm=opt?n.slice(1):n,rq=opt?{}:{required:1};
+  return h('label',{},l,t=='select'?h('select',{name:nm},o.map(x=>h('option',{value:x[0]},x[1]))):t=='area'?h('textarea',{name:nm,rows:3,...rq}):h('input',{name:nm,type:t||'text',...rq}))}),h('button',{},lab));return f};
+const clean=d=>{Object.keys(d).forEach(k=>d[k]===''&&delete d[k]);return d};
+const dayOpts=async(f=()=>1)=>(await api('GET','/club-days')).filter(f).map(d=>[d.id,`#${d.id} ${d.title||'Club day'} · ${d.day_date} · ${d.status}`]);
+const picker=o=>h('select',{},o.map(x=>h('option',{value:x[0]},x[1])));
+const dl=async(p,n)=>{const r=await api('GET',p),u=URL.createObjectURL(await r.blob()),a=h('a',{href:u,download:n});document.body.append(a);a.click();a.remove()};
+
+const TABS={student:['Clubs','Days','Check-in','Submit','Certs','Events'],coordinator:['Members','Days','Check-in','Grading','Certs','Events','Dashboard'],advisor:['Days','Certs','Events','Dashboard']};
+TABS.campus_admin=TABS.super_admin=['Clubs','Members','Days','Check-in','Grading','Certs','Events','Dashboard'];
+const P={};
+async function nav(t){clearInterval(iv);document.querySelectorAll('#nav button').forEach(b=>b.className=b.textContent==t?'on':'');
+ const m=document.getElementById('main');m.innerHTML='';await go(()=>P[t](m))}
+
+// ---------- Clubs & members ----------
+P.Clubs=async b=>{const cl=await api('GET','/clubs');
+ if(me.role=='student'){const mm=await api('GET','/memberships/me'),j=(c,ty)=>btn(ty,async()=>{await api('POST',`/clubs/${c.id}/join`,{type:ty});toast('Request sent');nav('Clubs')},'s');
+  b.append(card(h('h3',{},'Clubs on your campus'),tbl(cl,[['Club','name'],['Seats',c=>`${c.approved_count}/${c.capacity}`],['Join',c=>[j(c,'primary'),j(c,'secondary')]]])),
+   card(h('h3',{},'My requests'),tbl(mm,[['Club','club_name'],['Type','type'],['Status',m=>pill(m.status)]])));return}
+ b.append(card(h('h3',{},'Create club'),frm([['name','Name'],['capacity','Capacity','number'],['?advisor_id','Advisor user ID','number'],['?campus_id','Campus ID (super admin only)','number']],'Create',async d=>{await api('POST','/clubs',clean(d));toast('Club created');nav('Clubs')})),
+  card(h('h3',{},'All clubs'),tbl(cl,[['ID','id'],['Club','name'],['Seats',c=>`${c.approved_count}/${c.capacity}`]])),
+  card(h('h3',{},'Add coordinator'),frm([['club_id','Club ID','number'],['user_id','Coordinator user ID','number']],'Add',async d=>{await api('POST',`/clubs/${d.club_id}/coordinators`,{user_id:+d.user_id});toast('Added')})))};
+P.Members=async b=>{const cl=await api('GET','/clubs');if(!cl.length)return b.append(card('No clubs.'));
+ const s=picker(cl.map(c=>[c.id,c.name])),box=h('div');
+ const load=async()=>{const r=await api('GET',`/clubs/${s.value}/memberships`);box.replaceChildren(tbl(r,[['Student',m=>`${m.student_name} (${m.student_code})`],['User ID','student_id'],['Type','type'],['Status',m=>pill(m.status)],
+  ['',m=>m.status=='pending'&&[btn('Approve',async()=>{await api('POST',`/memberships/${m.id}/decision`,{decision:'approve'});load()}),btn('Reject',async()=>{await api('POST',`/memberships/${m.id}/decision`,{decision:'reject',reason:prompt('Reason?')||null});load()},'d')]]]))};
+ s.onchange=()=>go(load);b.append(card(h('h3',{},'Join requests'),s,box));await load()};
+
+// ---------- Club days ----------
+const NEXT={approved:'announced',announced:'open',open:'submissions',submissions:'evaluating',evaluating:'closed'};
+P.Days=async b=>{const ds=await api('GET','/club-days'),mgr=!['student','advisor'].includes(me.role),adv=['advisor','campus_admin','super_admin'].includes(me.role);
+ if(mgr){const cl=await api('GET','/clubs');b.append(card(h('h3',{},'New club day'),frm([['club_id','Club','select',cl.map(c=>[c.id,c.name])],['day_date','Date','date'],['?title','Title'],['?submission_deadline','Submission deadline','datetime-local']],'Create',async d=>{clean(d);if(d.submission_deadline)d.submission_deadline=new Date(d.submission_deadline).toISOString();await api('POST','/club-days',d);toast('Created');nav('Days')})))}
+ b.append(card(h('h3',{},'Club days'),tbl(ds,[['#','id'],['Club','club_name'],['Date','day_date'],['Title','title'],['Status',d=>pill(d.status)],['Actions',d=>[
+  mgr&&d.status=='planned'&&btn('Submit plan',async()=>{const t=prompt('Activity plan (min 10 characters)');if(t)await api('PUT',`/club-days/${d.id}/plan`,{body:t});toast('Plan sent')},'s'),
+  adv&&d.status=='planned'&&[btn('Approve plan',async()=>{await api('POST',`/club-days/${d.id}/plan/decision`,{decision:'approve'});nav('Days')}),btn('Reject',async()=>{await api('POST',`/club-days/${d.id}/plan/decision`,{decision:'reject',reason:prompt('Reason?')||null});nav('Days')},'d')],
+  mgr&&NEXT[d.status]&&btn('→ '+NEXT[d.status],async()=>{await api('POST',`/club-days/${d.id}/transition`,{target:NEXT[d.status]});nav('Days')},'s')]]])))};
+
+// ---------- Check-in ----------
+P['Check-in']=async b=>{if(me.role=='student')return scan(b);
+ const ds=await dayOpts(d=>d.status=='open'),box=h('div');
+ b.append(card(h('h3',{},'Open a check-in window'),frm([['club_day_id','Club day (must be "open")','select',ds],['?duration_minutes','Duration, minutes (default 30)','number'],['?late_after_minutes','Late after, minutes (default 10)','number']],'Open window',async d=>{const id=d.club_day_id;delete d.club_day_id;clean(d);for(const k in d)d[k]=+d[k];const r=await api('POST',`/checkin/club-days/${id}/open`,d);live(box,r.id)},0),
+  h('p',{class:'mut'},'Window already open?'),frm([['sid','Session ID','number']],'Resume',async d=>live(box,+d.sid),0)),box)};
+function live(box,sid){clearInterval(iv);box.replaceChildren();
+ const q=h('div',{class:'qr'}),tk=h('div',{class:'big'}),at=h('div');let last='';
+ box.append(card(h('h3',{},'Live QR · session '+sid),q,tk,h('p',{class:'mut'},'Students scan this or type the code. It rotates about every 25 seconds.'),btn('Close window',async()=>{await api('POST',`/checkin/sessions/${sid}/close`);clearInterval(iv);toast('Closed')},'d')),
+  card(h('h3',{},'Attendance'),at),
+  card(h('h3',{},'Correction (reason required)'),frm([['student_id','Student user ID','number'],['action','Action','select',[['add','Add'],['remove','Remove']]],['reason','Reason (min 5 characters)']],'Apply',async d=>{await api('POST',`/checkin/sessions/${sid}/corrections`,{...d,student_id:+d.student_id});toast('Done')})));
+ const tick=async()=>{try{const r=await api('GET',`/checkin/sessions/${sid}/qr`);
+  if(r.payload!=last){last=r.payload;q.replaceChildren();new QRCode(q,{text:r.payload,width:240,height:240})}tk.textContent=r.token;
+  const a=await api('GET',`/checkin/sessions/${sid}/attendance`);
+  at.replaceChildren(tbl(a,[['Student',x=>`${x.student_name} (${x.student_code})`],['Time',x=>new Date(x.checked_in_at).toLocaleTimeString()],['Late',x=>x.is_late?'late':''],['Flags',x=>[x.geo_flag&&'geo ',x.corrected&&'corrected']]]))}
+  catch(e){tk.textContent=e.message;clearInterval(iv)}};
+ tick();iv=setInterval(tick,4000)}
+const place=()=>new Promise(r=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>r({lat:p.coords.latitude,lng:p.coords.longitude}),()=>r({}),{timeout:2500}):r({}));
+const submitScan=async(sid,token)=>{if(!sid)throw new Error('Enter the session ID');const r=await api('POST','/checkin/scan',{session_id:+sid,token:token.trim(),...await place()});toast(r.is_late?'Checked in (late)':'Checked in!')};
+function scan(b){const hist=h('div'),vid=h('div'),
+ load=async()=>hist.replaceChildren(tbl(await api('GET','/checkin/attendance/me'),[['Club','club_name'],['Day','title'],['Date','day_date'],['When',x=>new Date(x.checked_in_at).toLocaleString()],['Late',x=>x.is_late?'late':'']]));
+ const f=frm([['?sid','Session ID'],['token','Code from the screen (or paste the full CLUBCHK:… text)']],'Check in',async d=>{let{sid,token}=d;if(token.startsWith('CLUBCHK:'))[,sid,token]=token.split(':');await submitScan(sid,token);load()});
+ b.append(card(h('h3',{},'Check in'),f,vid,'BarcodeDetector'in window&&btn('Scan QR with camera',async()=>{
+  const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}),v=h('video',{autoplay:1,playsinline:1,width:280}),det=new BarcodeDetector({formats:['qr_code']});
+  v.srcObject=s;vid.replaceChildren(v);const stop=()=>{s.getTracks().forEach(t=>t.stop());vid.replaceChildren()};
+  const lp=async()=>{if(!v.isConnected)return stop();const r=await det.detect(v).catch(()=>[]);
+   if(r[0]&&r[0].rawValue.startsWith('CLUBCHK:')){stop();const[,sid,tk]=r[0].rawValue.split(':');await go(()=>submitScan(sid,tk));load()}else setTimeout(lp,350)};v.onplaying=lp},'s'),
+  'BarcodeDetector'in window?'':h('p',{class:'mut'},'This browser has no camera QR scanning. Type the code shown on the screen (Chrome and Edge support camera scanning).')),
+  card(h('h3',{},'My attendance'),hist));return load()}
+
+// ---------- Submissions & grading ----------
+const SUBROW=s=>[['Item',s.url?h('a',{href:s.url,target:'_blank'},s.url):s.original_filename],['',s.kind!='link'&&btn('Download',()=>dl(`/submissions/${s.id}/download`,s.original_filename||'file'),'s')]];
+P.Submit=async b=>{const ds=await dayOpts(d=>['open','submissions','evaluating','closed'].includes(d.status)),pick=picker(ds),list=h('div');
+ const load=async()=>{if(!pick.value)return;const r=await api('GET',`/club-days/${pick.value}/submissions`);
+  list.replaceChildren(tbl(r,[['Type','kind'],['Item',s=>s.url||s.original_filename],['When',s=>new Date(s.submitted_at).toLocaleString()+(s.is_late?' (late)':'')],['Score',s=>s.evaluation?`${s.evaluation.total}/${s.evaluation.max_total} ${s.evaluation.comment||''}`:'-'],['',s=>s.kind!='link'&&btn('Download',()=>dl(`/submissions/${s.id}/download`,s.original_filename||'file'),'s')]]))};
+ pick.onchange=()=>go(load);
+ b.append(card(h('h3',{},'Club day'),pick),
+  card(h('h3',{},'Upload file or photo'),frm([['kind','Type','select',[['file','Document (pdf, ppt, doc)'],['photo','Photo']]],['file','File','file']],'Upload',async d=>{const fd=new FormData();fd.append('kind',d.kind);fd.append('file',d.file);await api('POST',`/club-days/${pick.value}/submissions/file`,null,fd);toast('Uploaded');load()})),
+  card(h('h3',{},'Submit a link'),frm([['url','Link (https://...)','url']],'Submit',async d=>{await api('POST',`/club-days/${pick.value}/submissions/link`,{url:d.url});toast('Submitted');load()})),
+  card(h('h3',{},'My submissions (scores appear once the day is closed)'),list));await load()};
+P.Grading=async b=>{const ds=await dayOpts(),rb=await api('GET','/rubric'),pick=picker(ds),list=h('div');
+ const load=async()=>{if(!pick.value)return;const r=await api('GET',`/club-days/${pick.value}/submissions`);
+  list.replaceChildren(tbl(r,[['Student',s=>`${s.student_name} (${s.student_code})`],['Item',s=>s.url?h('a',{href:s.url,target:'_blank'},s.url):s.original_filename],['Late',s=>s.is_late?'late':''],
+   ['',s=>s.kind!='link'&&btn('Download',()=>dl(`/submissions/${s.id}/download`,s.original_filename||'file'),'s')],
+   ['Score',s=>frm([...rb.map(c=>[c.key,`${c.key} (0-${c.max_score})`,'number']),['?comment','Comment']],s.evaluation?`Update (${s.evaluation.total}/${s.evaluation.max_total})`:'Save',async d=>{const comment=d.comment;delete d.comment;for(const k in d)d[k]=+d[k];await api('PUT',`/submissions/${s.id}/evaluation`,{scores:d,comment:comment||null});toast('Saved');load()},0)]]))};
+ pick.onchange=()=>go(load);b.append(card(h('h3',{},'Club day (scoring opens when the day reaches "submissions")'),pick),card(list));await load()};
+
+// ---------- Certificates ----------
+P.Certs=async b=>{const list=h('div'),ds=await dayOpts(),sl=picker(ds),
+ cols=[['Type','kind'],['Status',c=>pill(c.status+(c.revoked?' · revoked':''))],['Student',c=>c.student_name],['Activity',c=>c.title],['ID',c=>h('small',{},c.id)],
+  ['',c=>[c.status=='ready'&&btn('PDF',()=>dl(`/certificates/${c.id}/download`,'certificate.pdf'),'s'),h('a',{href:`${API()}/verify/${c.id}`,target:'_blank'},' verify')]]];
+ if(me.role=='student'){const load=async()=>list.replaceChildren(tbl(await api('GET','/certificates/me'),cols));
+  b.append(card(h('h3',{},'Claim a participation certificate (needs verified attendance)'),sl,btn('Claim',async()=>{await api('POST','/certificates/participation',{club_day_id:+sl.value});toast('Requested. The PDF is generated in the background.');load();setTimeout(load,4000)})),
+   card(h('h3',{},'My certificates'),btn('Refresh',load,'s'),list));return load()}
+ const load=async()=>{if(sl.value)list.replaceChildren(tbl(await api('GET',`/club-days/${sl.value}/certificates`),cols))};sl.onchange=()=>go(load);
+ b.append(card(h('h3',{},'Club day'),sl,me.role!='advisor'&&btn('Issue participation to all attendees',async()=>{const r=await api('POST',`/club-days/${sl.value}/certificates/participation`);toast(`Issued ${r.issued}, already had ${r.already_had}`);load()})));
+ if(me.role!='coordinator')b.append(card(h('h3',{},'Achievement certificate (advisor)'),frm([['student_id','Student user ID','number'],['achievement','Achievement (e.g. Best Project)']],'Issue',async d=>{await api('POST','/certificates/achievement',{student_id:+d.student_id,club_day_id:+sl.value,achievement:d.achievement});toast('Issued');load()})),
+  card(h('h3',{},'Revoke a certificate'),frm([['id','Certificate ID (full)'],['reason','Reason (min 5 characters)']],'Revoke',async d=>{await api('POST',`/certificates/${d.id.trim()}/revoke`,{reason:d.reason});toast('Revoked');load()})));
+ b.append(card(h('h3',{},'Certificates for this day'),btn('Refresh',load,'s'),list));await load()};
+
+// ---------- Events & dashboards (backend stages 5 and 6 are not built yet) ----------
+P.Events=async b=>{
+ const ev=await api('GET','/events'),adm=['campus_admin','super_admin'].includes(me.role),stu=me.role=='student',det=h('div');
+ async function show(id){
+  const e=await api('GET','/events/'+id),mine=e.my_team&&e.my_team.id,rs=await api('GET',`/events/${id}/results`),box=[];
+  box.push(h('h3',{},`${e.name} · ${e.type} · ${e.registered}/${e.capacity} registered`+(e.team_size?` · teams of up to ${e.team_size}`:'')+(e.registration_open?'':' · closed')));
+  if(stu){
+   box.push(e.my_registered?btn('Unregister',async()=>{await api('DELETE',`/events/${id}/register`);toast('Unregistered');nav('Events')},'d'):btn('Register',async()=>{await api('POST',`/events/${id}/register`);toast('Registered');nav('Events')}));
+   if(e.my_registered&&!mine)box.push(frm([['name','New team name']],'Create team',async d=>{await api('POST',`/events/${id}/teams`,{name:d.name});toast('Team created');show(id)}));
+   if(mine)box.push(btn('Leave '+e.my_team.name,async()=>{await api('POST',`/events/${id}/teams/leave`);toast('Left team');show(id)},'s'));
+  }
+  box.push(h('h3',{},'Teams'),tbl(e.teams,[['ID','id'],['Team','name'],['Members',t=>t.members.map(m=>m.student_name).join(', ')],
+   ['',t=>stu&&e.my_registered&&!mine&&(!e.team_size||t.members.length<e.team_size)&&btn('Join',async()=>{await api('POST',`/events/${id}/teams/${t.id}/join`);toast('Joined');show(id)})]]));
+  if(rs.length)box.push(h('h3',{},'Results'),tbl(rs,[['Rank','rank'],['Winner',r=>r.team_name||r.student_name],['Notes','notes']]));
+  if(adm){
+   const rg=await api('GET',`/events/${id}/registrations`);
+   box.push(h('h3',{},'Registrations and check-in'),tbl(rg,[['Student',r=>`${r.student_name} (${r.student_code})`],['User ID','student_id'],['Team','team_name'],
+    ['Checked in',r=>r.checked_in_at?new Date(r.checked_in_at).toLocaleTimeString():btn('Check in',async()=>{await api('POST',`/events/${id}/checkin`,{student_id:r.student_id});show(id)})]]),
+    h('h3',{},'Publish results (replaces any existing)'),
+    frm([['lines','One per line: team_id,rank   e.g.  3,1','area']],'Publish results',async d=>{
+     const results=d.lines.split('\n').map(s=>s.trim()).filter(Boolean).map(s=>{const[p,q]=s.split(',').map(x=>x.trim());return{team_id:+p,rank:+q}});
+     await api('PUT',`/events/${id}/results`,{results});toast('Results saved');show(id)},0));
+  }
+  det.replaceChildren(card(...box));
+ }
+ if(adm)b.append(card(h('h3',{},'Create event'),frm([['name','Name'],['type','Type','select',[['gambade','Gambade'],['hackathon','Hackathon'],['cross_road','Cross Road']]],['capacity','Capacity','number'],['?team_size','Team size','number'],['?starts_at','Starts (registration closes then)','datetime-local'],['?campus_id','Campus ID (super admin only)','number']],'Create',async d=>{clean(d);if(d.starts_at)d.starts_at=new Date(d.starts_at).toISOString();await api('POST','/events',d);toast('Event created');nav('Events')})));
+ b.append(card(h('h3',{},'Events'),tbl(ev,[['Name','name'],['Type','type'],['Seats',e=>`${e.registered}/${e.capacity}`],['Starts',e=>e.starts_at?new Date(e.starts_at).toLocaleString():'-'],
+  ['',e=>[btn('Open',()=>go(()=>show(e.id)),'s'),stu&&e.my_registered&&pill('registered')]]])),det)};
+
+P.Dashboard=async b=>{
+ const sum=card(h('h3',{},'Summary')),
+  cl=card(h('h3',{},'Clubs'),btn('Download CSV',()=>dl('/dashboards/export/clubs','clubs.csv'),'s')),
+  ia=card(h('h3',{},'Inactive clubs (no approved club day in the last N weeks)')),
+  zp=card(h('h3',{},'Zero-participation students (no attendance, submissions or event registrations)')),
+  mo=card(h('h3',{},'Monthly report')),
+  st=card(h('h3',{},'Students (first 100)'),btn('Download CSV',()=>dl('/dashboards/export/students','students.csv'),'s'));
+ b.append(sum,cl,ia,zp,mo,st);
+ const nice=k=>k.replace(/_/g,' '),cols=r=>Object.keys(r[0]||{}).map(k=>[nice(k),k]),
+  flat=o=>Object.entries(o).map(([k,v])=>({k:nice(k),v:v&&typeof v=='object'?JSON.stringify(v):v}));
+ await go(async()=>{
+  sum.append(tbl(flat(await api('GET','/dashboards/summary')),[['Metric','k'],['Value','v']]));
+  const c1=await api('GET','/dashboards/clubs');cl.append(tbl(c1,cols(c1)));
+  const wk=h('input',{type:'number',value:4,min:1,max:104,style:'width:90px'}),ib=h('div'),
+   li=async()=>{const r=await api('GET','/dashboards/inactive-clubs?weeks='+(wk.value||4));ib.replaceChildren(tbl(r,[['Club','club_name'],['Members','members'],['Last club day',x=>x.last_club_day||'never']]))};
+  ia.append('Weeks: ',wk,btn('Refresh',li,'s'),ib);await li();
+  const z=await api('GET','/dashboards/zero-participation');
+  zp.append(h('p',{class:'mut'},z.length+' student(s)'),tbl(z,[['Student',x=>`${x.name} (${x.student_code})`],['User ID','student_id']]));
+  const mi=h('input',{type:'text',value:new Date().toISOString().slice(0,7),placeholder:'YYYY-MM',style:'width:110px'}),mb=h('div'),
+   lm=async()=>{const r=await api('GET','/dashboards/monthly-report?month='+encodeURIComponent(mi.value));
+    mb.replaceChildren(h('p',{},r.reconciled?'Totals reconcile with the raw tables.':'MISMATCH: '+JSON.stringify(r.mismatches)),tbl(r.clubs,cols(r.clubs)),h('p',{},h('b',{},'Totals: '),JSON.stringify(r.totals)))};
+  mo.append('Month: ',mi,btn('Show',lm,'s'),btn('Download CSV',()=>dl('/dashboards/export/monthly-report?month='+encodeURIComponent(mi.value),'report-'+mi.value+'.csv'),'s'),mb);await lm();
+  const s1=await api('GET','/dashboards/students?limit=100');st.append(tbl(s1,cols(s1)));
+ })};
+
+// ---------- shell ----------
+const out=()=>{tok=null;me=null;sessionStorage.clear();clearInterval(iv);loginView()};
+function shell(){const A=document.getElementById('app');A.innerHTML='';
+ A.append(h('header',{},h('b',{},'Club Tracker'),h('span',{class:'mut'},`${me.role.replace('_',' ')} · user #${me.id}`),h('button',{class:'s',onclick:out},'Sign out')),
+  h('nav',{id:'nav'},TABS[me.role].map(t=>h('button',{onclick:()=>nav(t)},t))),h('main',{id:'main'}));nav(TABS[me.role][0])}
+function loginView(){const A=document.getElementById('app');A.innerHTML='';
+ const f=frm([['identifier','Email or student ID'],['password','Password','password']],'Sign in',async d=>{const r=await api('POST','/auth/login',d);tok=r.access_token;me=r.user;sessionStorage.setItem('t',tok);sessionStorage.setItem('me',JSON.stringify(me));shell()},0);
+ const demo=[['s001@demo.edu','Student 1'],['s002@demo.edu','Student 2'],['s003@demo.edu','Student 3'],['coord@demo.edu','Coordinator'],['advisor@demo.edu','Advisor'],['admin@demo.edu','Campus admin'],['super@demo.edu','Super admin']];
+ A.append(h('main',{},card(h('h3',{},'Club Activities Tracker'),f,h('p',{class:'mut'},'Demo users (password: password123)'),
+  demo.map(([e,l])=>h('button',{class:'s',onclick:()=>{f.identifier.value=e;f.password.value='password123'}},l)),
+  h('label',{},'API address',h('input',{value:API(),onchange:e=>localStorage.setItem('api',e.target.value)})))))}
+me&&tok?shell():loginView();
+</script></body></html>

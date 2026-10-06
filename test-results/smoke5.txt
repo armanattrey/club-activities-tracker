@@ -1,0 +1,40 @@
+PASS  student cannot create an event (403)
+PASS  capacity 0 is rejected (422)
+PASS  campus admin creates an event (201)
+PASS  student sees the event, 0 registered, not registered yet
+PASS  other campus does not see it
+PASS  other campus cannot open it (404)
+PASS  other campus cannot register (404)
+PASS  registration closed once the event has started (409)
+PASS  s001 registers (201)
+PASS  double registration is blocked (409)
+PASS  3 simultaneous registrations for 1 seat: exactly one wins
+PASS  seat count is exactly 1 afterwards
+PASS  s001 creates team Alpha (201)
+PASS  a student cannot create a second team (409)
+PASS  team names are unique ignoring case (409)
+PASS  s002 joins Alpha (200)
+PASS  full team rejects a third member (409)
+PASS  s003 creates team Beta (201)
+PASS  a student already in a team cannot join another (409)
+PASS  s002 leaves Alpha (200)
+PASS  s002 joins Beta (200)
+PASS  joining a team that does not exist (404 or 409)
+PASS  s002 unregisters (200)
+PASS  unregistering also removed s002 from Beta
+PASS  student cannot list registrations (403)
+PASS  student cannot check people in (403)
+PASS  admin checks s001 in (200)
+PASS  checking in twice is blocked (409)
+PASS  checking in someone not registered (404)
+PASS  registration list shows 2 students, s001 checked in
+PASS  student cannot set results (403)
+PASS  same team twice is rejected (422)
+PASS  a team from nowhere is rejected (422)
+PASS  a result must name a team OR a student, not both (422)
+PASS  admin publishes results (200)
+PASS  student reads results, Alpha ranked first
+PASS  teams are locked once results are published (409)
+PASS  unregistering is locked once results are published (409)
+
+38/38 checks passed

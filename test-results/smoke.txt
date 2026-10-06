@@ -1,0 +1,28 @@
+PASS  setup: s001 is an approved member of club 1
+PASS  coordinator creates club day (201, planned)
+PASS  skipping planned->open is blocked (409)
+PASS  student cannot create a club day (403)
+PASS  coordinator submits plan (200)
+PASS  advisor approves plan (200)
+PASS  club day is now 'approved'
+PASS  transition to 'announced' (200)
+PASS  transition to 'open' (200)
+PASS  student sees the announced/open club day
+PASS  coordinator opens check-in window (201)
+PASS  session secret is NOT leaked in the response
+PASS  student cannot fetch the QR (403)
+PASS  student scans a live QR (201, not late)
+PASS  double check-in is blocked (409)
+PASS  invalid/stale token is rejected (403)
+PASS  non-member cannot check in (403)
+PASS  coordinator sees s001 in attendance
+PASS  student sees own attendance
+PASS  correction with a weak reason is refused (422)
+PASS  correction: remove with a real reason (200)
+PASS  removed student is gone from attendance
+PASS  correction: add with a real reason (200)
+PASS  re-added record is flagged 'corrected'
+PASS  coordinator closes the window (200)
+PASS  QR is refused after close (409)
+
+26/26 checks passed

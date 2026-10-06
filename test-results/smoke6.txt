@@ -1,0 +1,46 @@
+PASS  dashboards need login (401)
+PASS  student is refused: /dashboards/summary (403)
+PASS  student is refused: /dashboards/clubs (403)
+PASS  student is refused: /dashboards/students (403)
+PASS  student is refused: /dashboards/zero-participation (403)
+PASS  student is refused: /dashboards/inactive-clubs (403)
+PASS  student is refused: /dashboards/monthly-report?month=2026-10 (403)
+PASS  student is refused: /dashboards/export/clubs (403)
+PASS  summary counts match the raw tables
+PASS  summary status breakdown adds up to the total
+PASS  clubs table matches the raw tables for every club
+PASS  average score matches the raw evaluations
+PASS  coordinator sees only their own club
+PASS  advisor sees the clubs they advise
+PASS  campus admin sees the whole campus
+PASS  super admin sees everything
+PASS  monthly report reconciles with the raw totals
+PASS  monthly figures for Robotics match the raw tables
+PASS  an empty month is all zeros and still reconciles
+PASS  December rolls over to the next year correctly (200)
+PASS  bad month '2026-13' is rejected (422)
+PASS  bad month 'abc' is rejected (422)
+PASS  bad month '2026-1' is rejected (422)
+PASS  month is required (422)
+PASS  coordinator's monthly report covers only their club
+PASS  inactive clubs (1 weeks) match the raw tables
+PASS  inactive clubs (52 weeks) match the raw tables
+PASS  weeks=0 is rejected (422)
+PASS  zero-participation list matches the raw tables
+PASS  coordinator sees zero-participation only among their members
+PASS  club filter works
+PASS  unknown club filter is 404
+PASS  a club outside the coordinator's scope is 404
+PASS  students list covers every student on the campus
+PASS  one student's figures match the raw tables
+PASS  pagination returns exactly one row
+PASS  limit=0 is rejected (422)
+PASS  clubs CSV: right type, header, one row per club
+PASS  students CSV has one row per student
+PASS  monthly CSV has one row per club
+PASS  monthly CSV needs a month (422)
+PASS  unknown export is 404
+PASS  student cannot export (403)
+PASS  CSV formula injection is neutralised
+
+44/44 checks passed

@@ -1,0 +1,38 @@
+Unable to find image 'grafana/k6:latest' locally
+latest: Pulling from grafana/k6
+4f4fb700ef54: Pulling fs layer
+460c68aff3e0: Pulling fs layer
+5de55e5ef9c0: Pulling fs layer
+2043a1e748be: Pulling fs layer
+4f4fb700ef54: Already exists
+460c68aff3e0: Download complete
+44136fa355b3: Already exists
+608497185493: Download complete
+5de55e5ef9c0: Download complete
+460c68aff3e0: Pull complete
+5de55e5ef9c0: Pull complete
+2043a1e748be: Download complete
+4f4fb700ef54: Pull complete
+2043a1e748be: Pull complete
+Digest: sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+Status: Downloaded newer image for grafana/k6:latest
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /loadtest/checkin.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 50 max VUs, 3m30s max duration (incl. graceful stop):
+              * burst: 1 iterations for each of 50 VUs (maxDuration: 3m0s, gracefulStop: 30s)
+
+students=50 created=50 dup=0 errors=0 p95=81.2ms
+RESULT_JSON:{"level":50,"requests":50,"created_201":50,"already_409":0,"other_errors":0,"avg_ms":38.9,"med_ms":33.4,"p90_ms":81,"p95_ms":81.2,"p99_ms":81.4,"max_ms":81.5,"burst_seconds":0.1}
+
+running (0m00.1s), 00/50 VUs, 50 complete and 0 interrupted iterations
+burst ✓ [ 100% ] 50 VUs  0m00.1s/3m0s  50/50 iters, 1 per VU
