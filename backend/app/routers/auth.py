@@ -27,5 +27,3 @@ async def login(body: LoginIn, conn=Depends(get_conn)):
 @router.get("/me")
 async def me(user: dict = Depends(current_user)):
     return user
-
-# TODO: POST /users (admin creates accounts), password reset.

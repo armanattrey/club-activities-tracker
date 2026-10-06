@@ -1,11 +1,8 @@
 """Time-based jobs. Celery tasks are sync, so each one runs a short async
 function with its own asyncpg connection.
 
-My reading of the brief's deadlines (confirm or correct me):
-  7-day  -> remind coordinators who have no approved plan
-  3-day  -> auto-announce (IMPLEMENTED below)
-  48-hr  -> remind members before the club day
-  5-day  -> remind students of upcoming submission deadlines
+Scheduled reminders are written to the in-app notification inbox. The unique
+dedupe key makes each reminder idempotent across repeated beat runs.
 """
 import asyncio
 import logging
@@ -27,19 +24,22 @@ async def _with_conn(fn):
 
 
 async def _announce(conn) -> int:
-    # NOTE: current_date uses the DB server's timezone (UTC). Fine for a skeleton;
-    # revisit if a club day near midnight IST matters.
     async with conn.transaction():
         days = await conn.fetch(
             """UPDATE club_days SET status = 'announced'
-               WHERE status = 'approved' AND day_date <= current_date + 3
+               WHERE status = 'approved'
+                 AND day_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date
+                 AND day_date <= (now() AT TIME ZONE 'Asia/Kolkata')::date + 3
                RETURNING id, club_id"""
         )
         for d in days:
             await conn.execute(
-                """INSERT INTO notifications (user_id, kind, payload)
+                """INSERT INTO notifications (user_id, kind, payload, dedupe_key)
                    SELECT student_id, 'club_day.announced',
-                          jsonb_build_object('club_day_id', $1::bigint)
+                          jsonb_build_object('club_day_id', $1::bigint,
+                                             'club_name', (SELECT name FROM clubs WHERE id=$2),
+                                             'day_date', (SELECT day_date FROM club_days WHERE id=$1)),
+                          'club_day.announced:' || $1::text || ':' || student_id::text
                    FROM club_memberships
                    WHERE club_id = $2 AND status = 'approved'""",
                 d["id"], d["club_id"],
@@ -61,39 +61,162 @@ def announce_upcoming_club_days():
 
 
 async def _count_pending(conn) -> int:
-    return await conn.fetchval(
-        "SELECT count(*) FROM notifications WHERE sent_at IS NULL AND send_at <= now()"
-    )
+    async with conn.transaction():
+        rows = await conn.fetch(
+            """UPDATE notifications SET sent_at=now()
+               WHERE sent_at IS NULL AND send_at <= now() RETURNING id"""
+        )
+        return len(rows)
 
 
 @celery.task(name="workers.tasks_schedule.send_pending_notifications")
 def send_pending_notifications():
-    """STUB: only logs the backlog. TODO: deliver (in-app/email) and set sent_at."""
+    """Make due notification rows available in the in-app inbox."""
     n = asyncio.run(_with_conn(_count_pending))
     log.info("pending notifications: %s", n)
     return n
 
 
+async def _remind_plan_7d(conn) -> int:
+    async with conn.transaction():
+        rows = await conn.fetch(
+            """INSERT INTO notifications (user_id, kind, payload, dedupe_key)
+               SELECT cc.user_id, 'club_day.plan_due',
+                      jsonb_build_object('club_day_id', d.id, 'club_id', c.id,
+                                         'club_name', c.name, 'day_date', d.day_date),
+                      'club_day.plan_due:' || d.id::text || ':' || cc.user_id::text
+               FROM club_days d
+               JOIN clubs c ON c.id=d.club_id
+               JOIN club_coordinators cc ON cc.club_id=c.id
+               LEFT JOIN activity_plans p ON p.club_day_id=d.id
+               WHERE d.status='planned'
+                 AND (p.id IS NULL OR p.status='rejected')
+                 AND d.day_date=(now() AT TIME ZONE 'Asia/Kolkata')::date + 7
+               ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+               RETURNING id"""
+        )
+        return len(rows)
+
+
 @celery.task(name="workers.tasks_schedule.remind_plan_7d")
 def remind_plan_7d():
-    """STUB. TODO: club days 7 days away with no approved plan -> notify coordinators."""
-    log.info("remind_plan_7d: TODO")
+    n = asyncio.run(_with_conn(_remind_plan_7d))
+    log.info("queued %s plan reminder(s)", n)
+    return n
+
+
+async def _remind_48h(conn) -> int:
+    async with conn.transaction():
+        rows = await conn.fetch(
+            """INSERT INTO notifications (user_id, kind, payload, dedupe_key)
+               SELECT m.student_id, 'club_day.upcoming',
+                      jsonb_build_object('club_day_id', d.id, 'club_id', c.id,
+                                         'club_name', c.name, 'day_date', d.day_date,
+                                         'title', d.title),
+                      'club_day.upcoming:' || d.id::text || ':' || m.student_id::text
+               FROM club_days d
+               JOIN clubs c ON c.id=d.club_id
+               JOIN club_memberships m ON m.club_id=c.id AND m.status='approved'
+               WHERE d.status IN ('announced','approved')
+                 AND d.day_date=(now() AT TIME ZONE 'Asia/Kolkata')::date + 2
+               ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+               RETURNING id"""
+        )
+        return len(rows)
 
 
 @celery.task(name="workers.tasks_schedule.remind_48h")
 def remind_48h():
-    """STUB. TODO: club days within 48 hours -> notify approved members."""
-    log.info("remind_48h: TODO")
+    n = asyncio.run(_with_conn(_remind_48h))
+    log.info("queued %s upcoming Club Day reminder(s)", n)
+    return n
+
+
+async def _remind_deadline_5d(conn) -> int:
+    async with conn.transaction():
+        rows = await conn.fetch(
+            """INSERT INTO notifications (user_id, kind, payload, dedupe_key)
+               SELECT m.student_id, 'submission.deadline_soon',
+                      jsonb_build_object('club_day_id', d.id, 'club_id', c.id,
+                                         'club_name', c.name, 'title', d.title,
+                                         'deadline', d.submission_deadline),
+                      'submission.deadline_soon:' || d.id::text || ':' || m.student_id::text
+               FROM club_days d
+               JOIN clubs c ON c.id=d.club_id
+               JOIN club_memberships m ON m.club_id=c.id AND m.status='approved'
+               WHERE d.status IN ('open','submissions')
+                 AND d.submission_deadline IS NOT NULL
+                 AND d.submission_deadline > now()
+                 AND d.submission_deadline <= now() + interval '5 days'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM submissions s
+                   WHERE s.club_day_id=d.id AND s.student_id=m.student_id
+                 )
+               ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+               RETURNING id"""
+        )
+        return len(rows)
 
 
 @celery.task(name="workers.tasks_schedule.remind_deadline_5d")
 def remind_deadline_5d():
-    """STUB. TODO: submission deadlines within 5 days -> notify students without a submission."""
-    log.info("remind_deadline_5d: TODO")
+    n = asyncio.run(_with_conn(_remind_deadline_5d))
+    log.info("queued %s submission deadline reminder(s)", n)
+    return n
+
+
+async def _monthly_report(conn) -> int:
+    async with conn.transaction():
+        period_end = await conn.fetchval(
+            "SELECT date_trunc('month', now() AT TIME ZONE 'Asia/Kolkata')::date"
+        )
+        # Beat runs on days 28-31; report only on the final day of the month.
+        tomorrow = await conn.fetchval("SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date + 1")
+        if tomorrow.day != 1:
+            return 0
+        month = period_end.strftime("%Y-%m")
+        rows = await conn.fetch(
+            """SELECT u.id AS user_id, u.campus_id,
+                      count(DISTINCT c.id) FILTER (WHERE d.id IS NOT NULL) AS clubs,
+                      count(DISTINCT d.id) AS club_days,
+                      count(DISTINCT a.id) AS attendance_records,
+                      count(DISTINCT s.id) AS submissions
+               FROM users u
+               JOIN clubs c ON c.campus_id=u.campus_id
+               LEFT JOIN club_days d ON d.club_id=c.id AND d.status <> 'planned'
+                 AND d.day_date >= $1::date AND d.day_date < $2::date
+               LEFT JOIN checkin_sessions cs ON cs.club_day_id=d.id
+               LEFT JOIN attendance a ON a.session_id=cs.id
+               LEFT JOIN submissions s ON s.club_day_id=d.id
+               WHERE u.role='campus_admin'
+               GROUP BY u.id, u.campus_id""",
+            period_end, tomorrow,
+        )
+        made = 0
+        for row in rows:
+            notification = await conn.fetchval(
+                """INSERT INTO notifications (user_id, kind, payload, dedupe_key)
+                   VALUES ($1, 'campus.monthly_report', $2,
+                           'campus.monthly_report:' || $3::text || ':' || $4::text)
+                   ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+                   RETURNING id""",
+                row["user_id"],
+                {
+                    "month": month,
+                    "clubs": row["clubs"],
+                    "club_days": row["club_days"],
+                    "attendance_records": row["attendance_records"],
+                    "submissions": row["submissions"],
+                },
+                row["campus_id"], month,
+            )
+            made += notification is not None
+        return made
 
 
 @celery.task(name="workers.tasks_schedule.monthly_report")
 def monthly_report():
-    """STUB. TODO: only run if tomorrow is the 1st; build the report from the
-    same SQL views as the dashboards so the figures reconcile with raw data."""
-    log.info("monthly_report: TODO")
+    """Notify campus managers when a month has ended."""
+    n = asyncio.run(_with_conn(_monthly_report))
+    log.info("queued %s monthly report notification(s)", n)
+    return n

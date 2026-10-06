@@ -7,7 +7,7 @@ Lifecycle: planned -> approved -> announced -> open -> submissions -> evaluating
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 from datetime import date
 
 from app.core import audit
@@ -34,7 +34,16 @@ class ClubDayIn(BaseModel):
 
 
 class PlanIn(BaseModel):
-    body: str = Field(min_length=10)
+    body: str | None = Field(default=None, min_length=10)
+    topic: str | None = Field(default=None, min_length=2, max_length=240)
+    format: str | None = Field(default=None, min_length=2, max_length=120)
+    deliverable: str | None = Field(default=None, min_length=2, max_length=500)
+
+    @model_validator(mode="after")
+    def require_plan_content(self):
+        if self.body is None and not all((self.topic, self.format, self.deliverable)):
+            raise ValueError("Provide body or all of topic, format and deliverable")
+        return self
 
 
 class PlanDecisionIn(BaseModel):
@@ -108,8 +117,12 @@ async def list_club_days(
         params.append(club_id)
         where += f" AND d.club_id=${len(params)}"
     rows = await conn.fetch(
-        f"""SELECT d.*, c.name AS club_name FROM club_days d
+        f"""SELECT d.*, c.name AS club_name, p.body AS plan_body,
+                   p.topic AS plan_topic, p.format AS plan_format,
+                   p.deliverable AS plan_deliverable, p.status AS plan_status
+            FROM club_days d
             JOIN clubs c ON c.id = d.club_id
+            LEFT JOIN activity_plans p ON p.club_day_id=d.id
             {where} ORDER BY d.day_date DESC""",
         *params,
     )
@@ -145,12 +158,16 @@ async def submit_plan(
     if day["status"] != "planned":
         raise HTTPException(409, "The plan can only be edited while the club day is 'planned'")
     row = await conn.fetchrow(
-        """INSERT INTO activity_plans (club_day_id, body, status)
-           VALUES ($1, $2, 'pending')
+        """INSERT INTO activity_plans (club_day_id, body, topic, format, deliverable, status)
+           VALUES ($1, $2, $3, $4, $5, 'pending')
            ON CONFLICT (club_day_id)
-           DO UPDATE SET body = EXCLUDED.body, status = 'pending', approved_by = NULL
+           DO UPDATE SET body = EXCLUDED.body, topic = EXCLUDED.topic,
+                         format = EXCLUDED.format, deliverable = EXCLUDED.deliverable,
+                         status = 'pending', approved_by = NULL
            RETURNING *""",
-        club_day_id, body.body,
+        club_day_id,
+        body.body or f"Topic: {body.topic}\nFormat: {body.format}\nDeliverable: {body.deliverable}",
+        body.topic, body.format, body.deliverable,
     )
     return dict(row)
 

@@ -34,7 +34,7 @@ celery.conf.beat_schedule = {
         "task": "workers.tasks_certificates.sweep_pending_certificates",
         "schedule": 60.0,
     },
-    # stubs for the remaining reminders (see the task docstrings)
+    # reminders write idempotent entries into the in-app notification inbox
     "plan-reminder-7d": {
         "task": "workers.tasks_schedule.remind_plan_7d",
         "schedule": crontab(hour=9, minute=0),

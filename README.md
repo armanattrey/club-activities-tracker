@@ -9,8 +9,9 @@ Backend: FastAPI, PostgreSQL, Redis, Celery. Frontend: one static HTML file (no 
 | Area | State |
 |---|---|
 | Auth and 5 roles with row-level scoping | Done |
+| Campus and account provisioning; club descriptions and registry editing | Done |
 | Clubs, memberships (1 primary + 1 secondary, capacity) | Done |
-| Club days lifecycle, plan approval, scheduler | Done (7-day, 48-hour and 5-day reminders are scheduled stubs) |
+| Club days lifecycle, plan approval, scheduler | Done (announcement and in-app reminders at 7 days, 48 hours and 5 days) |
 | Rotating-QR check-in, late flag, geo flag, corrections with a reason | Done |
 | Submissions (file, photo, link), deadlines, rubric scoring | Done |
 | Certificates: PDF, tamper detection, public verify page, revocation | Done |
@@ -18,7 +19,8 @@ Backend: FastAPI, PostgreSQL, Redis, Celery. Frontend: one static HTML file (no 
 | Dashboards, monthly report, CSV export | Done |
 | Load test (100, 300, 500 concurrent check-ins) | Done, see TEST_REPORT.md |
 | Event certificates, transcript, budgets, Duty Leave, gallery, WhatsApp | Not built |
-| Delivery of notifications (rows are queued, nothing is sent) | Not built |
+| In-app notification inbox, read state and scheduled reminders | Done |
+| Email, push and WhatsApp notification delivery | Not built |
 
 ## Quick start
 
@@ -30,6 +32,7 @@ cd frontend && python3 -m http.server 5500          # open http://localhost:5500
 ```
 
 - API docs: http://localhost:8000/docs
+- Campus managers and program managers can create accounts from the **Administration** tab; program managers can also add campuses. Existing databases must apply new SQL migrations `006_notifications.sql` and `007_registry_plans.sql`.
 - Generate secrets with: python3 -c "import secrets; print(secrets.token_hex(32))" and put the result in JWT_SECRET (and optionally CERT_SECRET) in .env.
 - The SQL files in backend/migrations run automatically, in order, only on the first start with an empty database. On an existing database, apply a new one with:
   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backend/migrations/00X_name.sql
@@ -89,6 +92,7 @@ docs/               PRIVACY.md, COST.md
 - No rate limiting on the public verify endpoints, only a 5 MB upload cap.
 - Login tokens last 8 hours and carry the role, so a role change takes effect at the next login.
 - There is no endpoint to deactivate or delete a user.
+- Notifications appear in the in-app inbox; email, push and WhatsApp delivery need provider credentials and are not configured.
 - Files are stored on a local Docker volume, not S3.
 - Camera QR scanning works in Chrome and Edge only; other browsers type the shown code.
 - Certificates with non-Latin names need an extra font package in the Docker image.
