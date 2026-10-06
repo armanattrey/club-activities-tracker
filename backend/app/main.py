@@ -8,7 +8,7 @@ from app import db, redis_client
 from app.core.state_machines import InvalidTransition
 from app.routers import (
     admin, auth, certificates, checkin, club_days, clubs, health, memberships,
-    dashboards, events, notifications, submissions, verify,
+    dashboards, events, extras, notifications, submissions, verify,
 )
 
 
@@ -47,3 +47,4 @@ app.include_router(verify.router)  # PUBLIC: no login
 app.include_router(notifications.router)
 app.include_router(events.router)
 app.include_router(dashboards.router)
+app.include_router(extras.router)

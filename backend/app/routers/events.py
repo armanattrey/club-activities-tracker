@@ -27,6 +27,7 @@ class EventIn(BaseModel):
     team_size: int | None = Field(default=None, ge=1, le=50)
     starts_at: AwareDatetime | None = None
     campus_id: int | None = None  # super admin only
+    is_inter_college: bool = False
 
 
 class TeamIn(BaseModel):
@@ -59,6 +60,8 @@ def _event_out(r, registered=None) -> dict:
     return {
         "id": r["id"], "campus_id": r["campus_id"], "type": r["type"], "name": r["name"],
         "capacity": r["capacity"], "team_size": r["team_size"], "starts_at": s,
+        "is_inter_college": r["is_inter_college"],
+        "approved_at": r["approved_at"],
         "registered": r["registered"] if registered is None else registered,
         "registration_open": s is None or datetime.now(timezone.utc) < s,
     }
@@ -69,7 +72,8 @@ async def _event_for(conn, user: dict, event_id: int, lock: bool = False):
     ev = await conn.fetchrow(
         f"SELECT * FROM events WHERE id=$1 {'FOR UPDATE' if lock else ''}", event_id
     )
-    if ev is None or (user["role"] != "super_admin" and ev["campus_id"] != user["campus_id"]):
+    cross_campus_student = user["role"] == "student" and ev is not None and ev["is_inter_college"] and ev["approved_at"] is not None
+    if ev is None or (user["role"] != "super_admin" and ev["campus_id"] != user["campus_id"] and not cross_campus_student):
         raise HTTPException(404, "Event not found")
     return ev
 
@@ -119,10 +123,10 @@ async def create_event(
     try:
         async with conn.transaction():
             row = await conn.fetchrow(
-                """INSERT INTO events (campus_id, type, name, capacity, team_size, starts_at)
-                   VALUES ($1,$2,$3,$4,$5,$6) RETURNING *""",
+                """INSERT INTO events (campus_id, type, name, capacity, team_size, starts_at, is_inter_college)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *""",
                 campus_id, body.type, body.name.strip(), body.capacity,
-                body.team_size, body.starts_at,
+                body.team_size, body.starts_at, body.is_inter_college,
             )
             await audit.log(
                 conn, actor_id=user["id"], action="event.create", entity="events",
@@ -140,6 +144,8 @@ async def list_events(user: dict = Depends(current_user), conn=Depends(get_conn)
     order = " ORDER BY e.starts_at NULLS LAST, e.id DESC"
     if user["role"] == "super_admin":
         rows = await conn.fetch(base + order)
+    elif user["role"] == "student":
+        rows = await conn.fetch(base + " WHERE e.campus_id=$1 OR (e.is_inter_college AND e.approved_at IS NOT NULL)" + order, user["campus_id"])
     else:
         rows = await conn.fetch(base + " WHERE e.campus_id=$1" + order, user["campus_id"])
     out = [_event_out(r) for r in rows]
@@ -170,6 +176,11 @@ async def get_event(event_id: int, user: dict = Depends(current_user), conn=Depe
            WHERE t.event_id=$1 ORDER BY t.id, u.name""",
         event_id,
     )
+    if user["role"] == "student":
+        if not await conn.fetchval("SELECT 1 FROM registrations WHERE event_id=$1 AND student_id=$2", event_id, user["id"]):
+            rows = []
+        else:
+            rows = [r for r in rows if r["student_id"] == user["id"]]
     teams: dict = {}
     for r in rows:
         t = teams.setdefault(r["team_id"], {"id": r["team_id"], "name": r["team_name"], "members": []})
@@ -211,8 +222,34 @@ async def register(
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(409, "You are already registered for this event")
+        if ev["is_inter_college"] and ev["approved_at"] is not None and user["campus_id"] != ev["campus_id"]:
+            await conn.execute(
+                """INSERT INTO duty_leave_requests (event_id, student_id)
+                   VALUES ($1,$2) ON CONFLICT (event_id, student_id) DO NOTHING""",
+                event_id, user["id"],
+            )
     return {"event_id": event_id, "registered": True, "seats_left": ev["capacity"] - taken - 1,
             "registered_at": row["created_at"]}
+
+
+@router.post("/{event_id}/approve")
+async def approve_inter_college_event(
+    event_id: int, user: dict = Depends(require_role(*ADMIN_ROLES)), conn=Depends(get_conn),
+):
+    async with conn.transaction():
+        ev = await _event_for(conn, user, event_id, lock=True)
+        if not ev["is_inter_college"]:
+            raise HTTPException(409, "Only inter-college events need approval")
+        if ev["approved_at"] is not None:
+            raise HTTPException(409, "Event is already approved")
+        row = await conn.fetchrow(
+            "UPDATE events SET approved_by=$2, approved_at=now() WHERE id=$1 RETURNING approved_at",
+            event_id, user["id"],
+        )
+        await audit.log(conn, actor_id=user["id"], action="event.inter_college_approve",
+                        entity="events", entity_id=event_id,
+                        after={"approved": True, "approved_at": row["approved_at"]})
+    return {"event_id": event_id, "approved": True, "approved_at": row["approved_at"]}
 
 
 @router.delete("/{event_id}/register")

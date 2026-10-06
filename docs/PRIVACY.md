@@ -4,6 +4,7 @@
 - Accounts: name, email, student code, campus, role, password (bcrypt hash only).
 - Activity: club memberships, attendance (time, late flag, geo flag), submissions, scores and comments, event registrations and teams, certificates.
 - Uploaded files (documents, photos) and generated certificate PDFs.
+- Event gallery publication consent and moderation state. Gallery media is served publicly to signed-in users only after consent and approval.
 - An audit log of approvals, corrections, score changes, revocations and result publication, with the acting user and the stated reason.
 
 The phone's GPS position is used to compute a yes/no flag at check-in. The coordinates themselves are not stored.
@@ -17,6 +18,7 @@ PostgreSQL (all records) and a file volume (uploads and PDFs), both on the machi
 - Advisors: the clubs they advise.
 - Campus admins: their campus. Super admins: everything.
 - Anyone, without login: the certificate verify page, which shows the holder's name, activity, club, campus, date and certificate type. It never shows student code, email or the reason for a revocation.
+- Students can only access their own transcript, Duty Leave records, and certificates. Campus admins can access transcripts and Duty Leave requests for their own campus.
 
 ## Retention
 Not decided. The brief sets no period, so this needs a decision from the institution. Proposal for discussion: keep records for the academic year plus a stated number of years, then delete or anonymise.

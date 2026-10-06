@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.core import audit
 from app.core.permissions import (
-    CLUB_MANAGER_ROLES, assert_club_access, current_user, require_role,
+    ADMIN_ROLES, CLUB_MANAGER_ROLES, assert_club_access, current_user, require_role,
 )
 from app.db import get_conn
 from app.services import certificates as certs
@@ -40,7 +40,7 @@ _INSERT_SQL = """
     INSERT INTO certificates
       (id, student_id, kind, ref_type, ref_id, content_hmac,
        issued_by, issued_at, snapshot, status)
-    VALUES ($1,$2,$3,'club_day',$4,$5,$6,$7,$8,'pending')
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')
     ON CONFLICT (student_id, kind, ref_type, ref_id) DO NOTHING
     RETURNING *"""
 
@@ -55,6 +55,11 @@ class AchievementIn(BaseModel):
     achievement: str = Field(min_length=3, max_length=120)
 
 
+class EventAchievementIn(BaseModel):
+    student_id: int
+    achievement: str = Field(min_length=3, max_length=120)
+
+
 class RevokeIn(BaseModel):
     reason: str = Field(min_length=5, max_length=500)
 
@@ -65,7 +70,7 @@ def _public(row) -> dict:
         "id": str(row["id"]), "kind": row["kind"], "status": row["status"],
         "ref_type": row["ref_type"], "ref_id": row["ref_id"],
         "student_id": row["student_id"], "student_name": snap.get("student_name"),
-        "club_name": snap.get("club_name"), "title": snap.get("title"),
+        "club_name": snap.get("club_name"), "event_name": snap.get("event_name"), "title": snap.get("title"),
         "day_date": snap.get("day_date"), "achievement": snap.get("achievement"),
         "issued_at": row["issued_at"], "revoked": row["revoked_at"] is not None,
         "pdf_sha256": row["pdf_sha256"],
@@ -105,7 +110,7 @@ async def _issue(conn, *, student_id: int, kind: str, club_day_id: int,
         student_id=student_id, issued_by=issued_by, issued_at=issued_at, snapshot=snapshot,
     )
     row = await conn.fetchrow(
-        _INSERT_SQL, cert_id, student_id, kind, club_day_id, mac,
+        _INSERT_SQL, cert_id, student_id, kind, "club_day", club_day_id, mac,
         issued_by, issued_at, snapshot,
     )
     if row is None:
@@ -135,6 +140,69 @@ async def _club_of(conn, certificate_id: uuid.UUID, lock: bool = False):
     if row is None:
         raise HTTPException(404, "Certificate not found")
     return row
+
+
+async def _event_certificate_context(conn, event_id: int, student_id: int):
+    return await conn.fetchrow("""SELECT u.name AS student_name, ca_student.name AS campus_name,
+      e.name AS event_name, e.starts_at, e.campus_id, u.campus_id AS student_campus_id
+      FROM events e JOIN users u ON u.id=$2 JOIN campus ca_student ON ca_student.id=u.campus_id
+      WHERE e.id=$1 AND u.role='student'""", event_id, student_id)
+
+
+async def _issue_event(conn, *, student_id: int, event_id: int, kind: str,
+                       issued_by: int | None, achievement: str | None = None):
+    ctx = await _event_certificate_context(conn, event_id, student_id)
+    if ctx is None:
+        raise HTTPException(404, "Event or student not found")
+    snapshot = {"student_name": ctx["student_name"], "campus_name": ctx["campus_name"],
+                "event_name": ctx["event_name"], "day_date": ctx["starts_at"].date().isoformat() if ctx["starts_at"] else "",
+                "achievement": achievement}
+    cert_id = uuid.uuid4()
+    issued_at = datetime.now(timezone.utc)
+    mac = certs.compute_hmac(cert_id=str(cert_id), kind=kind, ref_type="event", ref_id=event_id,
+      student_id=student_id, issued_by=issued_by, issued_at=issued_at, snapshot=snapshot)
+    row = await conn.fetchrow(_INSERT_SQL, cert_id, student_id, kind, "event", event_id, mac,
+      issued_by, issued_at, snapshot)
+    if row is None:
+        existing = await conn.fetchrow("""SELECT * FROM certificates WHERE student_id=$1 AND kind=$2
+          AND ref_type='event' AND ref_id=$3""", student_id, kind, event_id)
+        return existing, False
+    await audit.log(conn, actor_id=issued_by, action="certificate.issue", entity="certificates",
+      entity_id=cert_id, after={"kind": kind, "student_id": student_id, "event_id": event_id})
+    return row, True
+
+
+async def _certificate_resource(conn, certificate_id: uuid.UUID, lock=False):
+    row = await conn.fetchrow(f"SELECT * FROM certificates WHERE id=$1 {'FOR UPDATE' if lock else ''}", certificate_id)
+    if row is None:
+        raise HTTPException(404, "Certificate not found")
+    if row["ref_type"] == "club_day":
+        resource = await conn.fetchrow("SELECT club_id FROM club_days WHERE id=$1", row["ref_id"])
+        row = dict(row)
+        row["club_id"] = resource["club_id"] if resource else None
+    elif row["ref_type"] == "event":
+        resource = await conn.fetchrow("SELECT campus_id FROM events WHERE id=$1", row["ref_id"])
+        row = dict(row)
+        row["event_campus_id"] = resource["campus_id"] if resource else None
+    return row
+
+
+async def _assert_certificate_access(conn, user, row, allow_students=True):
+    if user["role"] == "student":
+        if allow_students and row["student_id"] == user["id"]:
+            return
+        raise HTTPException(404, "Certificate not found")
+    if row["ref_type"] == "club_day":
+        if row.get("club_id") is None:
+            raise HTTPException(404, "Certificate not found")
+        await assert_club_access(conn, user, row["club_id"], allow=VIEW_ROLES)
+    elif row["ref_type"] == "event":
+        if user["role"] == "super_admin":
+            return
+        if user["role"] != "campus_admin" or user["campus_id"] != row.get("event_campus_id"):
+            raise HTTPException(404, "Certificate not found")
+    else:
+        raise HTTPException(404, "Certificate not found")
 
 
 # ------------------------------------------------------------------ issuing
@@ -229,6 +297,66 @@ async def issue_achievement(
     return _public(row)
 
 
+@router.post("/events/{event_id}/certificates/participation")
+async def issue_event_participation(event_id: int,
+    user: dict = Depends(require_role(*ADMIN_ROLES)), conn=Depends(get_conn)):
+    event = await conn.fetchrow("SELECT campus_id FROM events WHERE id=$1", event_id)
+    if event is None or (user["role"] != "super_admin" and event["campus_id"] != user["campus_id"]):
+        raise HTTPException(404, "Event not found")
+    new_ids = []
+    async with conn.transaction():
+        students = await conn.fetch("SELECT student_id FROM registrations WHERE event_id=$1 AND checked_in_at IS NOT NULL", event_id)
+        for student in students:
+            row, created = await _issue_event(conn, student_id=student["student_id"],
+              event_id=event_id, kind="participation", issued_by=user["id"])
+            if created:
+                new_ids.append(row["id"])
+    await _enqueue(new_ids)
+    return {"attendees": len(students), "issued": len(new_ids), "already_had": len(students)-len(new_ids)}
+
+
+@router.post("/events/{event_id}/certificates/participation/claim")
+async def claim_event_participation(event_id: int, response: Response,
+    user: dict = Depends(require_role("student")), conn=Depends(get_conn)):
+    checked_in = await conn.fetchval("SELECT 1 FROM registrations WHERE event_id=$1 AND student_id=$2 AND checked_in_at IS NOT NULL", event_id, user["id"])
+    if not checked_in:
+        raise HTTPException(403, "Verified event check-in is required")
+    async with conn.transaction():
+        row, created = await _issue_event(conn, student_id=user["id"], event_id=event_id, kind="participation", issued_by=None)
+    if created:
+        await _enqueue([row["id"]])
+        response.status_code = 201
+    return {**_public(row), "already_issued": not created}
+
+
+@router.post("/events/{event_id}/certificates/achievement", status_code=201)
+async def issue_event_achievement(event_id: int, body: EventAchievementIn,
+    user: dict = Depends(require_role(*ADMIN_ROLES)), conn=Depends(get_conn)):
+    event = await conn.fetchrow("SELECT campus_id FROM events WHERE id=$1", event_id)
+    if event is None or (user["role"] != "super_admin" and event["campus_id"] != user["campus_id"]):
+        raise HTTPException(404, "Event not found")
+    ranked = await conn.fetchval("""SELECT 1 FROM event_results r WHERE r.event_id=$1 AND
+      (r.student_id=$2 OR r.team_id IN (SELECT team_id FROM team_members WHERE event_id=$1 AND student_id=$2))""", event_id, body.student_id)
+    if not ranked:
+        raise HTTPException(422, "Student must appear in published event results")
+    async with conn.transaction():
+        row, created = await _issue_event(conn, student_id=body.student_id, event_id=event_id,
+          kind="achievement", issued_by=user["id"], achievement=body.achievement.strip())
+    if not created:
+        raise HTTPException(409, "This student already has an achievement certificate for this event")
+    await _enqueue([row["id"]])
+    return _public(row)
+
+
+@router.get("/events/{event_id}/certificates")
+async def event_certificates(event_id: int, user: dict = Depends(require_role(*VIEW_ROLES)), conn=Depends(get_conn)):
+    event = await conn.fetchrow("SELECT campus_id FROM events WHERE id=$1", event_id)
+    if event is None or (user["role"] != "super_admin" and event["campus_id"] != user["campus_id"]):
+        raise HTTPException(404, "Event not found")
+    rows = await conn.fetch("SELECT * FROM certificates WHERE ref_type='event' AND ref_id=$1 ORDER BY issued_at", event_id)
+    return [_public(r) for r in rows]
+
+
 # ------------------------------------------------------------------ reading
 @router.get("/certificates/me")
 async def my_certificates(
@@ -264,12 +392,8 @@ async def download(
     user: dict = Depends(current_user),
     conn=Depends(get_conn),
 ):
-    row = await _club_of(conn, certificate_id)
-    if user["role"] == "student":
-        if row["student_id"] != user["id"]:
-            raise HTTPException(404, "Certificate not found")  # don't reveal it exists
-    else:
-        await assert_club_access(conn, user, row["club_id"], allow=VIEW_ROLES)
+    row = await _certificate_resource(conn, certificate_id)
+    await _assert_certificate_access(conn, user, row)
 
     if row["status"] != "ready":
         raise HTTPException(409, f"Certificate is not ready yet (status: {row['status']})")
@@ -292,8 +416,8 @@ async def revoke(
     conn=Depends(get_conn),
 ):
     async with conn.transaction():
-        row = await _club_of(conn, certificate_id, lock=True)
-        await assert_club_access(conn, user, row["club_id"], allow=ADVISOR_ROLES)
+        row = await _certificate_resource(conn, certificate_id, lock=True)
+        await _assert_certificate_access(conn, user, row, allow_students=False)
         if row["revoked_at"] is not None:
             raise HTTPException(409, "Certificate is already revoked")
         await conn.execute(

@@ -53,6 +53,15 @@ def compute_hmac(**fields) -> str:
     return hmac.new(_key(), canonical(**fields), hashlib.sha256).hexdigest()
 
 
+def sign_transcript(snapshot: dict) -> str:
+    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return hmac.new(_key(), b"transcript|" + payload, hashlib.sha256).hexdigest()
+
+
+def verify_transcript(snapshot: dict, signature: str) -> bool:
+    return hmac.compare_digest(sign_transcript(snapshot), signature or "")
+
+
 def fields_from_row(row) -> dict:
     return dict(
         cert_id=str(row["id"]), kind=row["kind"], ref_type=row["ref_type"],
@@ -124,10 +133,19 @@ def render_pdf(*, cert_id, kind, snapshot: dict, issued_at: datetime) -> bytes:
 
     student = _e(snapshot.get("student_name", ""))
     club = _e(snapshot.get("club_name", ""))
+    event = _e(snapshot.get("event_name", ""))
     title = _e(snapshot.get("title", "Club Day"))
     day = _e(snapshot.get("day_date", ""))
 
-    if kind == "achievement":
+    if event:
+        if kind == "achievement":
+            heading = "Certificate of Achievement"
+            body = (f'has been recognised for<br><span class="highlight">{_e(snapshot.get("achievement", ""))}</span>'
+                    f'<br>at {event} &middot; {day}')
+        else:
+            heading = "Certificate of Participation"
+            body = f'has successfully participated in<br><span class="highlight">{event}</span><br>{day}'
+    elif kind == "achievement":
         heading = "Certificate of Achievement"
         body = (f'has been recognised for<br>'
                 f'<span class="highlight">{_e(snapshot.get("achievement", ""))}</span><br>'

@@ -18,7 +18,7 @@ Backend: FastAPI, PostgreSQL, Redis, Celery. Frontend: one static HTML file (no 
 | Events: registration, teams, check-in, results | Done |
 | Dashboards, monthly report, CSV export | Done |
 | Load test (100, 300, 500 concurrent check-ins) | Done, see TEST_REPORT.md |
-| Event certificates, transcript, budgets, Duty Leave, gallery, WhatsApp | Not built |
+| Event certificates, transcript, budgets, Duty Leave, gallery | Implemented in the backend (migration 008 required) |
 | In-app notification inbox, read state and scheduled reminders | Done |
 | Email, push and WhatsApp notification delivery | Not built |
 
@@ -32,7 +32,7 @@ cd frontend && python3 -m http.server 5500          # open http://localhost:5500
 ```
 
 - API docs: http://localhost:8000/docs
-- Campus managers and program managers can create accounts from the **Administration** tab; program managers can also add campuses. Existing databases must apply new SQL migrations `006_notifications.sql` and `007_registry_plans.sql`.
+- Campus managers and program managers can create accounts from the **Administration** tab; program managers can also add campuses. Existing databases must apply migrations `006_notifications.sql`, `007_registry_plans.sql`, and `008_extended_modules.sql`.
 - Generate secrets with: python3 -c "import secrets; print(secrets.token_hex(32))" and put the result in JWT_SECRET (and optionally CERT_SECRET) in .env.
 - The SQL files in backend/migrations run automatically, in order, only on the first start with an empty database. On an existing database, apply a new one with:
   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backend/migrations/00X_name.sql
@@ -93,6 +93,9 @@ docs/               PRIVACY.md, COST.md
 - Login tokens last 8 hours and carry the role, so a role change takes effect at the next login.
 - There is no endpoint to deactivate or delete a user.
 - Notifications appear in the in-app inbox; email, push and WhatsApp delivery need provider credentials and are not configured.
+- Inter-college events require campus-admin approval before students from other campuses can discover or register. Registrations create Duty Leave requests for the student's campus.
+- Event galleries require uploader publication consent and campus-admin moderation before photos are visible in the shared gallery.
+- Existing databases must apply `backend/migrations/008_extended_modules.sql`; fresh databases apply it after the base migrations.
 - Files are stored on a local Docker volume, not S3.
 - Camera QR scanning works in Chrome and Edge only; other browsers type the shown code.
 - Certificates with non-Latin names need an extra font package in the Docker image.

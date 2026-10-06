@@ -51,9 +51,11 @@ def _summary(row) -> dict:
             "id": str(row["id"]), "kind": row["kind"],
             "student_name": snap.get("student_name"),
             "club_name": snap.get("club_name"),
+            "event_name": snap.get("event_name"),
             "campus_name": snap.get("campus_name"),
             "title": snap.get("title"), "day_date": snap.get("day_date"),
             "achievement": snap.get("achievement"),
+            "ref_type": row["ref_type"],
             "issued_at": row["issued_at"].isoformat(),
         },
     }
@@ -143,6 +145,7 @@ async function load() {
     addRow(box, "Type", c.kind === "achievement" ? "Achievement" : "Participation");
     addRow(box, "Achievement", c.achievement);
     addRow(box, "Activity", c.title);
+    addRow(box, "Event", c.event_name);
     addRow(box, "Club", c.club_name);
     addRow(box, "Campus", c.campus_name);
     addRow(box, "Activity date", c.day_date);
