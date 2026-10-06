@@ -245,14 +245,14 @@ async def upload_event_media(event_id: int, consent_to_publish: bool = Form(...)
 async def list_event_media(event_id: int, user: dict = Depends(current_user), conn=Depends(get_conn)):
     await _event_access(conn, user, event_id)
     rows = await conn.fetch("""SELECT m.id,m.event_id,m.uploaded_by,m.original_filename,m.content_type,
-      m.size_bytes,m.created_at FROM event_media m WHERE m.event_id=$1 AND m.consent_to_publish
+      m.size_bytes,m.moderation_status,m.consent_to_publish,m.created_at FROM event_media m WHERE m.event_id=$1 AND m.consent_to_publish
       AND m.moderation_status='approved' ORDER BY m.created_at DESC""", event_id)
     if user["role"] in ADMIN_ROLES:
         rows += await conn.fetch("""SELECT m.id,m.event_id,m.uploaded_by,m.original_filename,m.content_type,
-          m.size_bytes,m.created_at FROM event_media m WHERE m.event_id=$1 AND m.moderation_status='pending'
+          m.size_bytes,m.moderation_status,m.consent_to_publish,m.created_at FROM event_media m WHERE m.event_id=$1 AND m.moderation_status='pending'
           AND m.uploaded_by<>$2 ORDER BY m.created_at DESC""", event_id, user["id"])
     own = await conn.fetch("""SELECT m.id,m.event_id,m.uploaded_by,m.original_filename,m.content_type,
-      m.size_bytes,m.created_at FROM event_media m WHERE m.event_id=$1 AND m.uploaded_by=$2
+      m.size_bytes,m.moderation_status,m.consent_to_publish,m.created_at FROM event_media m WHERE m.event_id=$1 AND m.uploaded_by=$2
       AND NOT (m.consent_to_publish AND m.moderation_status='approved') ORDER BY m.created_at DESC""", event_id, user["id"])
     rows += own
     return [dict(r) for r in rows]

@@ -179,8 +179,6 @@ async def get_event(event_id: int, user: dict = Depends(current_user), conn=Depe
     if user["role"] == "student":
         if not await conn.fetchval("SELECT 1 FROM registrations WHERE event_id=$1 AND student_id=$2", event_id, user["id"]):
             rows = []
-        else:
-            rows = [r for r in rows if r["student_id"] == user["id"]]
     teams: dict = {}
     for r in rows:
         t = teams.setdefault(r["team_id"], {"id": r["team_id"], "name": r["team_name"], "members": []})
