@@ -1,9 +1,12 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     database_url: str
-    redis_url: str
+    redis_url: str | None = None
+    app_mode: Literal["local", "production"] = "production"
     jwt_secret: str
     jwt_expire_minutes: int = 480
     # Stage 3: file storage

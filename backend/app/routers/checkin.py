@@ -212,7 +212,7 @@ async def correct_attendance(
         )
 
     if body.action == "remove":
-        # Postgres is the source of truth: free the Redis guard so the DB state
+        # PostgreSQL is the source of truth: free the cache guard so the DB state
         # and the fast-path state agree.
         await redis_client.redis.delete(checkin.done_key(session_id, body.student_id))
     return {"ok": True, "action": body.action}
@@ -221,7 +221,7 @@ async def correct_attendance(
 # ------------------------------------------------------------------- student
 @router.post("/scan", status_code=201)
 async def scan(body: ScanIn, user: dict = Depends(require_role("student"))):
-    """HOT PATH. Redis read -> HMAC check -> Redis SET NX -> one DB insert.
+    """HOT PATH. Cache read -> HMAC check -> atomic cache SET NX -> one DB insert.
     We deliberately do NOT use Depends(get_conn): a pooled connection is only
     taken at the very end, for the single INSERT."""
     r = redis_client.redis

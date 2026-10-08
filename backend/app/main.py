@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import db, redis_client
+from app.config import settings
 from app.core.state_machines import InvalidTransition
 from app.routers import (
     admin, auth, certificates, checkin, club_days, clubs, health, memberships,
@@ -15,10 +16,20 @@ from app.routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_pool()
-    await redis_client.init_redis()
-    yield
-    await redis_client.close_redis()
-    await db.close_pool()
+    workers_started = False
+    try:
+        await redis_client.init_redis()
+        if settings.app_mode == "local":
+            from app.local_workers import start_local_workers
+            await start_local_workers()
+            workers_started = True
+        yield
+    finally:
+        if workers_started:
+            from app.local_workers import stop_local_workers
+            await stop_local_workers()
+        await redis_client.close_redis()
+        await db.close_pool()
 
 
 app = FastAPI(title="Club Activities Tracker", lifespan=lifespan)

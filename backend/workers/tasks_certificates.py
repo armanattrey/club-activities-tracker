@@ -1,4 +1,4 @@
-"""PDF generation. Runs ONLY in the Celery worker, never inside a web request.
+"""PDF generation runs in the background, never inside a web request.
 
 Safety properties
 - claiming is atomic (UPDATE ... WHERE status='pending'), so two workers can
@@ -16,14 +16,14 @@ import os
 
 import asyncpg
 
-from workers.celery_app import celery
+from workers.task_runtime import celery
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 
 
 async def _generate_one(conn, cert_id: str) -> str:
-    # imported here so the Celery process only loads these when a task runs
+    # Imported here so lightweight processes only load PDF support when used.
     from app.services import certificates as certs
     from app.services.storage import get_storage
 
@@ -45,7 +45,8 @@ async def _generate_one(conn, cert_id: str) -> str:
         return "failed"
 
     try:
-        pdf = certs.render_pdf(
+        pdf = await asyncio.to_thread(
+            certs.render_pdf,
             cert_id=str(row["id"]), kind=row["kind"],
             snapshot=certs.as_dict(row["snapshot"]), issued_at=row["issued_at"],
         )

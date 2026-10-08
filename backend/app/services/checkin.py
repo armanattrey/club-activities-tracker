@@ -1,4 +1,4 @@
-"""Check-in logic shared by routers: rotating QR tokens, Redis session cache, geo math.
+"""Check-in logic shared by routers: rotating QR tokens, session cache, geo math.
 
 Design notes
 - The QR token is HMAC(secret, "session_id:step"). It is computed, never stored,
@@ -54,7 +54,7 @@ def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
-# ---------- Redis session cache ----------
+# ---------- check-in cache (Redis in production; memory for a local demo) ----------
 def _session_key(session_id: int) -> str:
     return f"checkin:session:{session_id}"
 
@@ -83,7 +83,7 @@ async def cache_session(row, club_id: int) -> dict:
 
 
 async def load_session(session_id: int) -> dict | None:
-    """Redis first; on a miss, load from Postgres and re-cache.
+    """Cache first; on a miss, load from PostgreSQL and re-cache.
     Acquires its own DB connection only on a miss, to keep the hot path light."""
     raw = await redis_client.redis.get(_session_key(session_id))
     if raw:

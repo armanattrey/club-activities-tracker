@@ -62,6 +62,12 @@ Not measured here: the breaking point above 500 students, sustained load over mi
 - Local automated verification in this environment was limited to Python AST parsing, inline JavaScript parsing, and `git diff --check`. The unit suite and live API/device runs could not start: `pytest` is not installed in the host Python environment and the Docker daemon is unavailable.
 - The current browser tab uses `file://`, which is blocked for live browser inspection. A deployed HTTPS URL is needed to run and show device viewport checks.
 
+## Local runtime follow-up
+
+- Added a Docker-free launcher using native PostgreSQL, process-local cache, in-process certificate work, and an in-process schedule loop. PostgreSQL remains required because core queries depend on PostgreSQL JSONB, `RETURNING`, time-zone functions, and row locks; this runtime was not switched to SQLite.
+- `bash -n scripts/run_local.sh`, Docker Compose configuration validation, Python syntax parsing, frontend inline-script parsing, and direct in-memory cache/schedule checks passed.
+- The full local launch was not exercised: this host has no PostgreSQL binaries, no running Docker daemon, and no pytest installation. Therefore API startup, migrations, certificate rendering, scheduler operations, and the retained production Celery/Redis path still need an integration run on a machine with the required services.
+
 ## Known limitations
 
 - No rate limiting on the public verify endpoints (only a 5 MB upload cap).

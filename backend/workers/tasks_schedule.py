@@ -11,7 +11,7 @@ import os
 
 import asyncpg
 
-from workers.celery_app import celery
+from workers.task_runtime import celery
 from workers.whatsapp import deliver_whatsapp
 
 log = logging.getLogger(__name__)

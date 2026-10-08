@@ -1,8 +1,7 @@
 """Issuing, listing, downloading and revoking certificates.
 
-PDF generation is NOT done here. We insert a 'pending' row and queue a Celery
-task; the worker renders the PDF. Why: rendering is CPU-heavy and must never
-sit in a web request path.
+PDF rendering stays out of the request path. Production queues it through
+Celery; local mode uses an in-process worker and the same database state.
 """
 import logging
 import uuid
@@ -13,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.core import audit
 from app.core.permissions import (
     ADMIN_ROLES, CLUB_MANAGER_ROLES, assert_club_access, current_user, require_role,
@@ -78,7 +78,16 @@ def _public(row) -> dict:
 
 
 async def _enqueue(cert_ids: list):
-    """Best effort: if this fails, the sweeper task picks the rows up within a minute."""
+    """Queue locally or in production; the persisted pending row is the fallback."""
+    if settings.app_mode == "local":
+        try:
+            from app.local_workers import enqueue_certificate
+            for cid in cert_ids:
+                await enqueue_certificate(str(cid))
+        except Exception:
+            log.warning("could not queue local certificate task; the sweeper will retry", exc_info=True)
+        return
+
     def _send():
         from workers.celery_app import celery
         for cid in cert_ids:

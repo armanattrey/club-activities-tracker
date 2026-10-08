@@ -20,8 +20,9 @@ async def _init_conn(conn: asyncpg.Connection):
 async def init_pool():
     global pool
     # Pool size matters for the 500-check-in load test: tune min/max per worker.
+    min_size, max_size = (1, 5) if settings.app_mode == "local" else (5, 20)
     pool = await asyncpg.create_pool(
-        settings.database_url, min_size=5, max_size=20, init=_init_conn
+        settings.database_url, min_size=min_size, max_size=max_size, init=_init_conn
     )
 
 

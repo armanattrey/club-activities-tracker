@@ -23,6 +23,8 @@ services:
   api:
     build: ./backend
     env_file: .env
+    environment:
+      APP_MODE: production
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_started }
@@ -36,6 +38,8 @@ services:
   worker:
     build: ./backend
     env_file: .env
+    environment:
+      APP_MODE: production
     depends_on: [redis, db]
     volumes:
       - ./backend:/app
@@ -45,6 +49,8 @@ services:
   beat:
     build: ./backend
     env_file: .env
+    environment:
+      APP_MODE: production
     depends_on: [redis, db]
     volumes: ["./backend:/app"]
     # schedule file goes to /tmp so it doesn't litter your project folder
