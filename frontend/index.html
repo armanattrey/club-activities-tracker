@@ -357,7 +357,7 @@ P.Dashboard=async b=>{
  })};
 
 P.Notifications=async b=>{
- const box=h('div'),refresh=async()=>{
+ const box=h('div'),waBox=h('div'),refresh=async()=>{
   const r=await api('GET','/notifications?limit=100');
   box.replaceChildren(h('p',{class:'mut'},`${r.unread_count} unread`),
    btn('Mark all read',async()=>{await api('POST','/notifications/read-all',{});refresh()},'s'),
@@ -377,7 +377,16 @@ P.Notifications=async b=>{
    }],['Received',n=>new Date(n.send_at).toLocaleString()],['Status',n=>n.read_at?'Read':'Unread'],['',n=>!n.read_at&&btn('Mark read',async()=>{await api('POST',`/notifications/${n.id}/read`,{});refresh()},'s')]]));
   updateBadge();
  };
- b.append(card(h('h3',{},'Notifications'),btn('Refresh',refresh,'s'),box));await refresh()
+ const renderWhatsApp=async()=>{
+  const p=await api('GET','/notifications/whatsapp-preference'),form=h('form',{class:'smart-form'}),phone=h('input',{type:'tel',inputmode:'tel',autocomplete:'tel',placeholder:'+14155552671','aria-label':'WhatsApp phone number'}),enabled=h('input',{type:'checkbox'}),consent=h('input',{type:'checkbox'}),save= h('button',{type:'submit'},p.enabled?'Update WhatsApp settings':'Save WhatsApp settings');
+  if(p.phone_last4)phone.placeholder=`Saved number ending in ${p.phone_last4}`;
+  enabled.checked=p.enabled;
+  form.append(h('label',{},'WhatsApp number (international format)',phone),h('label',{class:'check-field'},enabled,h('span',{},'Send activity reminders to this number')),h('label',{class:'check-field'},consent,h('span',{},'I agree to receive Club Activities Tracker updates on WhatsApp. I can turn this off here at any time.')),save);
+  form.addEventListener('submit',async e=>{e.preventDefault();try{await api('PUT','/notifications/whatsapp-preference',{phone_e164:phone.value.trim()||null,enabled:enabled.checked,consent:consent.checked});toast(enabled.checked?'WhatsApp notifications enabled':'WhatsApp notifications turned off');await renderWhatsApp()}catch(err){toast(err.message||'Could not update WhatsApp settings','error')}});
+  waBox.replaceChildren(h('p',{class:'mut'},p.enabled?'Enabled'+(p.phone_last4?` · number ending ${p.phone_last4}`:''):'Optional. Your number stays private and is never shown in the inbox.'),form)
+ };
+ b.append(card(h('h3',{},'Notifications'),btn('Refresh',refresh,'s'),box),card(h('h3',{},'WhatsApp reminders'),h('p',{class:'mut'},'Receive approved activity and deadline reminder templates from your institution.'),waBox));
+ await Promise.all([refresh(),renderWhatsApp()])
 };
 
 P.Administration=async b=>{

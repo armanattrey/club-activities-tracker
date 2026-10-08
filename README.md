@@ -21,7 +21,8 @@ Backend: FastAPI, PostgreSQL, Redis, Celery. Frontend: one static HTML file (no 
 | Load test (100, 300, 500 concurrent check-ins) | Done, see TEST_REPORT.md |
 | Event certificates, transcript, budgets, Duty Leave, gallery | Implemented in the backend (migration 008 required) |
 | In-app notification inbox, read state and scheduled reminders | Done |
-| Email, push and WhatsApp notification delivery | Not built |
+| WhatsApp Cloud API template delivery | Implemented; optional and disabled until configured |
+| Email and push notification delivery | Not built |
 
 ## Quick start
 
@@ -33,11 +34,12 @@ cd frontend && python3 -m http.server 5500          # open http://localhost:5500
 ```
 
 - API docs: http://localhost:8000/docs
-- Campus managers and program managers can create accounts from the **Administration** tab; program managers can also add campuses. Existing databases must apply migrations `006_notifications.sql`, `007_registry_plans.sql`, `008_extended_modules.sql`, and `009_problem5_requirements.sql` in order.
+- Campus managers and program managers can create accounts from the **Administration** tab; program managers can also add campuses. Existing databases must apply migrations `006_notifications.sql` through `010_whatsapp_delivery.sql` in order.
 - Generate secrets with: python3 -c "import secrets; print(secrets.token_hex(32))" and put the result in JWT_SECRET (and optionally CERT_SECRET) in .env.
 - The SQL files in backend/migrations run automatically, in order, only on the first start with an empty database. On an existing database, apply a new one with:
   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backend/migrations/00X_name.sql
 - To open the frontend from a phone, use your computer's IP address and change the API address field on the login screen.
+- WhatsApp is optional. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_TEMPLATE_NAME`, and optionally `WHATSAPP_TEMPLATE_LANGUAGE` in `.env`. The approved Meta template must accept exactly two body text parameters. Users separately enter their own international-format number and opt in from **Notifications**. Leave the credentials blank to keep outbound WhatsApp disabled. Apply migration `010_whatsapp_delivery.sql` to an existing database.
 
 Demo logins (password: password123): s001@demo.edu, s002@demo.edu, s003@demo.edu (students), coord@demo.edu, advisor@demo.edu, admin@demo.edu (campus admin), super@demo.edu, n001@demo.edu (student on another campus). Remove the demo users before any real deployment.
 
@@ -50,10 +52,11 @@ flowchart LR
   API --> PG[(PostgreSQL)]
   API --> R[(Redis)]
   API --> FS[(uploads volume)]
-  R --> W[Celery worker: certificate PDFs]
+  R --> W[Celery worker: certificates and notifications]
   B[Celery beat: schedules] --> R
   W --> PG
   W --> FS
+  W -. optional, opted-in templates .-> WA[Meta WhatsApp Cloud API]
 ```
 
 ## Design decisions
@@ -93,7 +96,7 @@ docs/               PRIVACY.md, COST.md
 - No rate limiting on the public verify endpoints, only a 5 MB upload cap.
 - Login tokens last 8 hours and carry the role, so a role change takes effect at the next login.
 - There is no endpoint to deactivate or delete a user.
-- Notifications appear in the in-app inbox; email, push and WhatsApp delivery need provider credentials and are not configured.
+- Notifications appear in the in-app inbox. WhatsApp template delivery is implemented but remains disabled until Meta credentials, a matching approved template, migration 010, and user opt-in are all present. Email and push delivery are not built.
 - Inter-college events require campus-admin approval before students from other campuses can discover or register. Registrations create Duty Leave requests for the student's campus.
 - Event galleries require uploader publication consent and campus-admin moderation before photos are visible in the shared gallery.
 - Existing databases must apply `backend/migrations/008_extended_modules.sql`; fresh databases apply it after the base migrations.

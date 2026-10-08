@@ -51,10 +51,16 @@ Not measured here: the breaking point above 500 students, sustained load over mi
 
 - A single end-to-end run across three clubs (plan through monthly report) is not recorded in this report.
 - Migration 009 additions (club approval, calendar CSV import, activity venues, presenter records, extended event types, campus and top-contributor reports) have not received integration-test coverage yet. This update was checked with Python/JavaScript syntax and whitespace checks only; the existing test results above predate these additions.
-- WhatsApp/Telegram delivery requires provider credentials and is not configured.
+- WhatsApp Cloud API template delivery is implemented behind user opt-in and optional Meta credentials; provider delivery has not been verified because credentials and an approved sender/template are not configured. Telegram remains unimplemented.
 - Sustained-load and breaking-point testing above 500 students; testing on a cloud server.
 - Robustness tests (network drop, service restart during a session).
 - Cost sheet needs the real hosting price (docs/COST.md).
+
+## Follow-up verification (2026-10-08)
+
+- WhatsApp opt-in, template dispatch, retry tracking, and delivery migration 010 were added. The Meta API call was not sent during this change because no provider credentials or approved template are configured.
+- Local automated verification in this environment was limited to Python AST parsing, inline JavaScript parsing, and `git diff --check`. The unit suite and live API/device runs could not start: `pytest` is not installed in the host Python environment and the Docker daemon is unavailable.
+- The current browser tab uses `file://`, which is blocked for live browser inspection. A deployed HTTPS URL is needed to run and show device viewport checks.
 
 ## Known limitations
 

@@ -12,6 +12,7 @@ import os
 import asyncpg
 
 from workers.celery_app import celery
+from workers.whatsapp import deliver_whatsapp
 
 log = logging.getLogger(__name__)
 
@@ -78,12 +79,18 @@ async def _count_pending(conn) -> int:
         return len(rows)
 
 
+async def _dispatch_due(conn) -> tuple[int, int]:
+    in_app_count = await _count_pending(conn)
+    whatsapp_count = await deliver_whatsapp(conn)
+    return in_app_count, whatsapp_count
+
+
 @celery.task(name="workers.tasks_schedule.send_pending_notifications")
 def send_pending_notifications():
-    """Make due notification rows available in the in-app inbox."""
-    n = asyncio.run(_with_conn(_count_pending))
-    log.info("pending notifications: %s", n)
-    return n
+    """Make due rows available in-app and deliver optional WhatsApp templates."""
+    in_app_count, whatsapp_count = asyncio.run(_with_conn(_dispatch_due))
+    log.info("notifications delivered in-app: %s; WhatsApp: %s", in_app_count, whatsapp_count)
+    return {"in_app": in_app_count, "whatsapp": whatsapp_count}
 
 
 async def _remind_plan_7d(conn) -> int:
