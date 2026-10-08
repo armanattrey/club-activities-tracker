@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: club-tracker-demo-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: bash scripts/start_public_demo.sh
+    healthCheckPath: /health
+    envVars:
+      - key: APP_MODE
+        value: local
+      - key: DATABASE_URL
+        fromDatabase:
+          name: club-tracker-demo-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: UPLOAD_DIR
+        value: /tmp/uploads
+      - key: PUBLIC_BASE_URL
+        fromService:
+          name: club-tracker-demo-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: club-tracker-demo
+    runtime: static
+    buildCommand: python3 scripts/build_public_frontend.py
+    staticPublishPath: ./dist/public-frontend
+    envVars:
+      - key: API_BASE_URL
+        fromService:
+          name: club-tracker-demo-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+
+databases:
+  - name: club-tracker-demo-db
+    plan: free
+    region: singapore
+    databaseName: clubtracker
+    user: club
+    postgresMajorVersion: "16"

@@ -38,7 +38,15 @@ pip install -r backend/requirements.txt
 
 Open http://127.0.0.1:5500 and sign in with a demo account (password: `password123`). API docs are at http://127.0.0.1:8000/docs. PostgreSQL data, generated uploads, and a local JWT secret persist under `.local/`. The check-in cache is in memory and clears on restart. Use `./scripts/run_local.sh` without `--demo` to skip demo data. The PostgreSQL server stays running after the app exits so its data remains available; stop it with `$(brew --prefix postgresql@16)/bin/pg_ctl -D .local/postgres stop`.
 
+The local launcher also makes the frontend and API reachable from other devices on your local network. Keep your computer and phone/tablet on the same Wi-Fi, run the launcher, then open the printed **On this network** frontend URL on the other device. The frontend automatically uses that same computer address for API requests. If your network blocks local connections, allow ports 5500 and 8000 through the computer's firewall. The database remains private to the computer.
+
 If multiple Python versions are installed, activate the virtual environment before launching, or set `PYTHON_BIN=python3.12`. If PostgreSQL tools are installed outside the standard Homebrew location, set `PG_BIN` to the installation's `bin` directory. WhatsApp delivery still needs Meta credentials, an approved template, network access, and user opt-in.
+
+## Public demo preview
+
+`render.yaml` defines a public Render preview: a static frontend, API, and seeded PostgreSQL database. Connect this repository to Render and deploy the Blueprint. The first API start applies the migrations and creates the demo accounts; subsequent starts preserve the database contents. The frontend is configured to call the deployed API over HTTPS.
+
+This uses free demo services. The API can take about a minute to wake after 15 minutes without traffic, the free PostgreSQL database expires after 30 days, and uploaded files are temporary. Scheduled jobs pause while the API sleeps. Demo logins are listed below and share the password `password123`; visitors can change shared demo data. Keep real student information out of this public preview. WhatsApp stays disabled without credentials.
 
 ## Quick start
 
@@ -57,7 +65,7 @@ cd frontend && python3 -m http.server 5500          # open http://localhost:5500
 - The SQL files in backend/migrations run automatically in the local launcher on a new local database, or on first Docker start with an empty volume. For an existing Docker database, apply migrations with:
   docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backend/migrations/00X_name.sql
 - For an existing local database, use `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/00X_name.sql` after setting `DATABASE_URL` to the local connection string.
-- To open the frontend from a phone, use your computer's IP address and change the API address field on the login screen.
+- To open the frontend from a phone during local development, use the **On this network** URL printed by `scripts/run_local.sh`; API requests automatically use the same host. The login screen's **Connection settings** can override the API address if needed.
 - WhatsApp is optional. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_GRAPH_API_VERSION`, `WHATSAPP_TEMPLATE_NAME`, and optionally `WHATSAPP_TEMPLATE_LANGUAGE` in `.env`. The approved Meta template must accept exactly two body text parameters. Users separately enter their own international-format number and opt in from **Notifications**. Leave the credentials blank to keep outbound WhatsApp disabled. Apply migration `010_whatsapp_delivery.sql` to an existing database.
 
 Demo logins (password: password123): s001@demo.edu, s002@demo.edu, s003@demo.edu (students), coord@demo.edu, advisor@demo.edu, admin@demo.edu (campus admin), super@demo.edu, n001@demo.edu (student on another campus). Remove the demo users before any real deployment.

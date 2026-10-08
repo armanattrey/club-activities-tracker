@@ -88,12 +88,13 @@ if [[ "${1:-}" == "--demo" ]]; then
   (cd "$ROOT/backend" && "$PYTHON_BIN" -m scripts.seed)
 fi
 
-API_HOST="${API_HOST:-127.0.0.1}"
+API_HOST="${API_HOST:-0.0.0.0}"
 API_PORT="${API_PORT:-8000}"
+WEB_HOST="${WEB_HOST:-0.0.0.0}"
 WEB_PORT="${WEB_PORT:-5500}"
 (cd "$ROOT/backend" && "$PYTHON_BIN" -m uvicorn app.main:app --host "$API_HOST" --port "$API_PORT" --reload) &
 API_PID=$!
-(cd "$ROOT/frontend" && "$PYTHON_BIN" -m http.server "$WEB_PORT" --bind 127.0.0.1) &
+(cd "$ROOT/frontend" && "$PYTHON_BIN" -m http.server "$WEB_PORT" --bind "$WEB_HOST") &
 WEB_PID=$!
 cleanup() {
   kill "$API_PID" "$WEB_PID" 2>/dev/null || true
@@ -104,6 +105,19 @@ trap cleanup EXIT INT TERM
 echo "Club Activities Tracker is starting in local mode."
 echo "Frontend: http://127.0.0.1:$WEB_PORT"
 echo "API docs: http://127.0.0.1:$API_PORT/docs"
+LAN_IP=""
+for interface in en0 en1; do
+  LAN_IP="$(ipconfig getifaddr "$interface" 2>/dev/null || true)"
+  [[ -n "$LAN_IP" ]] && break
+done
+if [[ -z "$LAN_IP" ]]; then
+  LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+fi
+if [[ -n "$LAN_IP" ]]; then
+  echo "On this network: http://$LAN_IP:$WEB_PORT (API: http://$LAN_IP:$API_PORT)"
+else
+  echo "To open on another device, use this computer's LAN IP with ports $WEB_PORT (frontend) and $API_PORT (API)."
+fi
 echo "PostgreSQL data: $PG_DATA (kept between runs)"
 echo "Press Ctrl+C to stop the app. PostgreSQL stays available for the next run."
 wait "$API_PID" "$WEB_PID"

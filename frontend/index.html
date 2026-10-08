@@ -106,7 +106,7 @@ img,canvas,video{max-width:100%}
  .record-total{margin:15px 0 0;text-align:left}
 }
 </style></head><body><div id="app"></div><script>
-const g=k=>localStorage.getItem(k),API=()=>g('api')||'http://localhost:8000';
+const g=k=>localStorage.getItem(k),API=()=>g('api')||window.CLUB_TRACKER_API||`${location.protocol==='https:'?'https:':'http:'}//${location.hostname||'localhost'}:8000`;
 let tok=sessionStorage.getItem('t'),me=JSON.parse(sessionStorage.getItem('me')||'null'),iv,badgeTimer,searchTimer,searchSeq=0,draftSeq=0,currentPage='';
 const h=(t,a={},...c)=>{const e=document.createElement(t);for(const k in a)k.startsWith('on')?e[k]=a[k]:e.setAttribute(k,a[k]);c.flat(9).forEach(x=>e.append(x&&x.nodeType?x:document.createTextNode(x==null||x===false?'':x)));return e};
 const toast=(m,bad)=>{const t=h('div',{class:'toast'+(bad?' bad':'')},m);document.body.append(t);setTimeout(()=>t.remove(),3600)};
